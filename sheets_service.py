@@ -6,8 +6,26 @@ from typing import Optional
 from openai import OpenAI
 from mcp_client import mcp_client
 
-# Initialize OpenAI client
-openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+# Initialize OpenAI client lazily to avoid import-time errors
+openai_client = None
+
+def get_openai_client():
+    global openai_client
+    if openai_client is None:
+        try:
+            openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        except Exception as e:
+            print(f"⚠️  OpenAI client initialization failed in sheets_service: {e}")
+            # Try with minimal parameters
+            try:
+                openai_client = OpenAI(
+                    api_key=os.getenv("OPENAI_API_KEY"),
+                    timeout=30.0
+                )
+            except Exception as e2:
+                print(f"⚠️  OpenAI client fallback initialization failed: {e2}")
+                raise e2
+    return openai_client
 
 class SheetsService:
     def __init__(self):
@@ -66,7 +84,8 @@ relevant to the user's query, let them know what information is available instea
 Keep your response conversational and helpful, as if you're speaking in a Slack channel.
 """
 
-            response = openai_client.chat.completions.create(
+            client = get_openai_client()
+            response = client.chat.completions.create(
                 model="gpt-4o",
                 messages=[
                     {"role": "system", "content": "You are Sara, a helpful AI assistant that analyzes Google Sheets data and provides natural language responses."},
