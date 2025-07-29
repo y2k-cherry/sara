@@ -19,7 +19,7 @@ class DirectSheetsService:
     
     def __init__(self):
         self.api_key = os.getenv('GOOGLE_API_KEY')
-        self.openai_client = openai.OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
+        self.openai_client = None
         self.oauth_credentials = None
         
         # Try to load OAuth credentials for private sheet access
@@ -27,6 +27,24 @@ class DirectSheetsService:
         
         if not self.api_key and not self.oauth_credentials:
             raise ValueError("Neither GOOGLE_API_KEY nor OAuth credentials found")
+    
+    def _get_openai_client(self):
+        """Get OpenAI client with lazy initialization"""
+        if self.openai_client is None:
+            try:
+                self.openai_client = openai.OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
+            except Exception as e:
+                print(f"⚠️  OpenAI client initialization failed in direct_sheets_service: {e}")
+                # Try with minimal parameters
+                try:
+                    self.openai_client = openai.OpenAI(
+                        api_key=os.getenv('OPENAI_API_KEY'),
+                        timeout=30.0
+                    )
+                except Exception as e2:
+                    print(f"⚠️  OpenAI client fallback initialization failed: {e2}")
+                    raise e2
+        return self.openai_client
     
     def _load_oauth_credentials(self):
         """Load OAuth credentials from token.json"""
@@ -177,7 +195,8 @@ Provide a brief, direct answer. Do not suggest manual formulas or explain how th
 """
 
             try:
-                response = self.openai_client.chat.completions.create(
+                client = self._get_openai_client()
+                response = client.chat.completions.create(
                     model="gpt-4",
                     messages=[
                         {"role": "system", "content": "You are Sara, a helpful assistant. Be brief and direct. Analyze the data and provide answers, don't suggest manual methods."},

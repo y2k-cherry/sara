@@ -18,7 +18,7 @@ class EmailService:
     """Service for handling email composition and sending"""
     
     def __init__(self):
-        self.openai_client = openai.OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
+        self.openai_client = None
         self.sender_email = "partnerships@cherryapp.in"
         self.sender_name = "Yash Kewalramani"
         
@@ -29,6 +29,24 @@ class EmailService:
         
         if not self.email_password:
             print("⚠️  EMAIL_PASSWORD not found in environment variables")
+    
+    def _get_openai_client(self):
+        """Get OpenAI client with lazy initialization"""
+        if self.openai_client is None:
+            try:
+                self.openai_client = openai.OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
+            except Exception as e:
+                print(f"⚠️  OpenAI client initialization failed in email_service: {e}")
+                # Try with minimal parameters
+                try:
+                    self.openai_client = openai.OpenAI(
+                        api_key=os.getenv('OPENAI_API_KEY'),
+                        timeout=30.0
+                    )
+                except Exception as e2:
+                    print(f"⚠️  OpenAI client fallback initialization failed: {e2}")
+                    raise e2
+        return self.openai_client
     
     def extract_email_details(self, message_text: str) -> dict:
         """Extract email purpose and recipient(s) from the message"""
@@ -62,7 +80,8 @@ If you can't determine the purpose, set it to empty string.
 Return ONLY the JSON, no other text.
 """
             
-            response = self.openai_client.chat.completions.create(
+            client = self._get_openai_client()
+            response = client.chat.completions.create(
                 model="gpt-4",
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.1
@@ -121,7 +140,8 @@ Return ONLY a JSON object with:
 Keep it concise - aim for 3-4 sentences maximum unless more detail is specifically needed.
 """
             
-            response = self.openai_client.chat.completions.create(
+            client = self._get_openai_client()
+            response = client.chat.completions.create(
                 model="gpt-4",
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.3
