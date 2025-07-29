@@ -49,7 +49,7 @@
 
 **Build & Deploy:**
 - **Build Command**: `pip install -r requirements.txt`
-- **Start Command**: `gunicorn orchestrator_http:app --bind 0.0.0.0:$PORT`
+- **Start Command**: `gunicorn wsgi:app --bind 0.0.0.0:$PORT`
 
 ### **Step 4: Add Environment Variables**
 
@@ -159,8 +159,8 @@ Should return:
 - Verify Python version compatibility
 
 **2. App Won't Start**
-- Check start command: `gunicorn orchestrator_http:app --bind 0.0.0.0:$PORT`
-- Verify `orchestrator_http.py` exists
+- Check start command: `gunicorn wsgi:app --bind 0.0.0.0:$PORT`
+- Verify `wsgi.py` and `orchestrator_http.py` exist
 
 **3. Slack Events Not Working**
 - Verify Request URL in Slack app settings

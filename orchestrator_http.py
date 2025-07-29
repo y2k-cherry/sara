@@ -15,11 +15,14 @@ from email_service import handle_email_request, handle_email_confirmation
 # Load environment variables
 load_dotenv()
 
-# Initialize Flask app first
+# Initialize Flask app first - MUST be available for Gunicorn
 flask_app = Flask(__name__)
-app = flask_app  # Alias for Gunicorn compatibility
 
 # Initialize Slack Bolt App (HTTP Mode) with error handling
+slack_app = None
+handler = None
+bot_user_id = None
+
 try:
     slack_app = App(
         token=os.getenv("SLACK_BOT_TOKEN"),
@@ -32,9 +35,10 @@ try:
     print("✅ Slack app initialized successfully")
 except Exception as e:
     print(f"⚠️  Slack app initialization failed: {e}")
-    slack_app = None
-    handler = None
-    bot_user_id = None
+    print("⚠️  Continuing with Flask app only...")
+
+# Ensure app variable is always available for Gunicorn
+app = flask_app
 
 # Initialize Direct Sheets Service
 try:
