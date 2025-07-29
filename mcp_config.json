@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "gdrive": {
+      "command": "node",
+      "args": ["./mcp-gdrive/dist/index.js"],
+      "env": {
+        "GOOGLE_CLIENT_ID": "",
+        "GOOGLE_CLIENT_SECRET": "",
+        "GOOGLE_REDIRECT_URI": "http://localhost:3000/oauth2callback"
+      }
+    }
+  }
+}
