@@ -6,7 +6,26 @@ from dotenv import load_dotenv
 # Load environment variables
 load_dotenv()
 
-client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+# Initialize OpenAI client lazily to avoid import-time errors
+client = None
+
+def get_openai_client():
+    global client
+    if client is None:
+        try:
+            client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        except Exception as e:
+            print(f"⚠️  OpenAI client initialization failed in intent_classifier: {e}")
+            # Try with minimal parameters
+            try:
+                client = openai.OpenAI(
+                    api_key=os.getenv("OPENAI_API_KEY"),
+                    timeout=30.0
+                )
+            except Exception as e2:
+                print(f"⚠️  OpenAI client fallback initialization failed: {e2}")
+                raise e2
+    return client
 
 def get_intent_from_text(text: str) -> str:
     """
@@ -58,7 +77,8 @@ Examples of help intent:
 - Any question asking about Sara's capabilities or functionality
 """
 
-    response = client.chat.completions.create(
+    openai_client = get_openai_client()
+    response = openai_client.chat.completions.create(
         model="gpt-4",  # or "gpt-3.5-turbo"
         messages=[{"role": "user", "content": prompt}],
         temperature=0,
