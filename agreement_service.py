@@ -24,7 +24,27 @@ TEMPLATE_PATH    = "Partnership Agreement Template.docx"
 
 # init clients
 slack_client = WebClient(token=SLACK_TOKEN)
-openai_client = OpenAI(api_key=OPENAI_API_KEY)
+
+# Initialize OpenAI client lazily to avoid import-time errors
+openai_client = None
+
+def get_openai_client():
+    global openai_client
+    if openai_client is None:
+        try:
+            openai_client = OpenAI(api_key=OPENAI_API_KEY)
+        except Exception as e:
+            print(f"⚠️  OpenAI client initialization failed: {e}")
+            # Try with minimal parameters
+            try:
+                openai_client = OpenAI(
+                    api_key=OPENAI_API_KEY,
+                    timeout=30.0
+                )
+            except Exception as e2:
+                print(f"⚠️  OpenAI client fallback initialization failed: {e2}")
+                raise e2
+    return openai_client
 
 # which fields we need
 REQUIRED_FIELDS = [
@@ -123,7 +143,8 @@ def extract_agreement_fields(message_text: str):
     )
 
     try:
-        chat = openai_client.chat.completions.create(
+        client = get_openai_client()
+        chat = client.chat.completions.create(
             model="gpt-4o",
             messages=[
                 {"role": "system", "content": sys_prompt},
