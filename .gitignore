@@ -70,6 +70,9 @@ tmp/
 temp/
 *.tmp
 
+# Text files with secrets
+Text
+
 # MCP directory (contains sensitive keys)
 mcp-gdrive/.env
 mcp-gdrive/gcp-oauth.keys.json
