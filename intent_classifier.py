@@ -17,33 +17,21 @@ def get_openai_client():
             client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
         except Exception as e:
             print(f"⚠️  OpenAI client initialization failed in intent_classifier: {e}")
-            # Try alternative initialization for Python 3.13 compatibility
-            try:
-                import openai as openai_module
-                # Set the API key directly on the module for older compatibility
-                openai_module.api_key = os.getenv("OPENAI_API_KEY")
-                client = openai_module.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-            except Exception as e2:
-                print(f"⚠️  OpenAI client fallback initialization failed: {e2}")
-                # Final fallback - create a minimal client
-                try:
-                    client = type('MockClient', (), {
-                        'chat': type('Chat', (), {
-                            'completions': type('Completions', (), {
-                                'create': lambda **kwargs: type('Response', (), {
-                                    'choices': [type('Choice', (), {
-                                        'message': type('Message', (), {
-                                            'content': 'help'  # Default to help intent
-                                        })()
-                                    })()]
+            # Skip the second attempt that also fails - go straight to mock client
+            print("⚠️  Using mock OpenAI client - defaulting to 'help' intent")
+            client = type('MockClient', (), {
+                'chat': type('Chat', (), {
+                    'completions': type('Completions', (), {
+                        'create': lambda **kwargs: type('Response', (), {
+                            'choices': [type('Choice', (), {
+                                'message': type('Message', (), {
+                                    'content': 'help'  # Default to help intent
                                 })()
-                            })()
+                            })()]
                         })()
                     })()
-                    print("⚠️  Using mock OpenAI client - defaulting to 'help' intent")
-                except Exception as e3:
-                    print(f"⚠️  All OpenAI client initialization attempts failed: {e3}")
-                    raise e3
+                })()
+            })()
     return client
 
 def get_intent_from_text(text: str) -> str:
