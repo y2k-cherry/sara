@@ -17,21 +17,22 @@ load_dotenv()
 
 # Initialize Flask app first
 flask_app = Flask(__name__)
+app = flask_app  # Alias for Gunicorn compatibility
 
 # Initialize Slack Bolt App (HTTP Mode) with error handling
 try:
-    app = App(
+    slack_app = App(
         token=os.getenv("SLACK_BOT_TOKEN"),
         signing_secret=os.getenv("SLACK_SIGNING_SECRET")
     )
-    handler = SlackRequestHandler(app)
+    handler = SlackRequestHandler(slack_app)
     
     # Get bot ID for thread detection
-    bot_user_id = app.client.auth_test()["user_id"]
+    bot_user_id = slack_app.client.auth_test()["user_id"]
     print("✅ Slack app initialized successfully")
 except Exception as e:
     print(f"⚠️  Slack app initialization failed: {e}")
-    app = None
+    slack_app = None
     handler = None
     bot_user_id = None
 
@@ -246,10 +247,10 @@ def home():
 
 
 # ─── Register Event Handlers ─────────────────────────────────────────────
-# Register event handlers if app is initialized
-if app:
-    app.event("app_mention")(route_mention)
-    app.event("message")(handle_all_messages)
+# Register event handlers if slack_app is initialized
+if slack_app:
+    slack_app.event("app_mention")(route_mention)
+    slack_app.event("message")(handle_all_messages)
     print("✅ Slack event handlers registered")
 
 
