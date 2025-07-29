@@ -15,18 +15,25 @@ from email_service import handle_email_request, handle_email_confirmation
 # Load environment variables
 load_dotenv()
 
-# Initialize Slack Bolt App (HTTP Mode)
-app = App(
-    token=os.getenv("SLACK_BOT_TOKEN"),
-    signing_secret=os.getenv("SLACK_SIGNING_SECRET")
-)
-
-# Initialize Flask app
+# Initialize Flask app first
 flask_app = Flask(__name__)
-handler = SlackRequestHandler(app)
 
-# Get bot ID for thread detection
-bot_user_id = app.client.auth_test()["user_id"]
+# Initialize Slack Bolt App (HTTP Mode) with error handling
+try:
+    app = App(
+        token=os.getenv("SLACK_BOT_TOKEN"),
+        signing_secret=os.getenv("SLACK_SIGNING_SECRET")
+    )
+    handler = SlackRequestHandler(app)
+    
+    # Get bot ID for thread detection
+    bot_user_id = app.client.auth_test()["user_id"]
+    print("✅ Slack app initialized successfully")
+except Exception as e:
+    print(f"⚠️  Slack app initialization failed: {e}")
+    app = None
+    handler = None
+    bot_user_id = None
 
 # Initialize Direct Sheets Service
 try:
@@ -36,9 +43,7 @@ except Exception as e:
     print(f"⚠️  Direct Sheets Service failed to initialize: {e}")
     direct_sheets = None
 
-
 # ─── Function: route_mention ─────────────────────────────────────────────
-@app.event("app_mention")
 def route_mention(event, say):
     raw_text = event["text"]
     cleaned_text = clean_slack_text(raw_text).lower()
@@ -115,7 +120,6 @@ Just mention me with `@Sara` and ask away! 🚀"""
 
 
 # ─── Function: handle_all_messages (thread replies) ──────────────────────
-@app.event("message")
 def handle_all_messages(body, say, client, logger):
     event = body.get("event", {})
     if event.get("bot_id"):
@@ -215,17 +219,38 @@ Just mention me with `@Sara` and ask away! 🚀"""
 # ─── Flask Routes for Slack Events ───────────────────────────────────────
 @flask_app.route("/slack/events", methods=["POST"])
 def slack_events():
-    return handler.handle(request)
+    # Handle Slack URL verification challenge
+    if request.json and "challenge" in request.json:
+        return {"challenge": request.json["challenge"]}
+    
+    # Handle regular Slack events
+    if handler:
+        return handler.handle(request)
+    else:
+        return {"error": "Slack handler not initialized"}, 500
 
 
 @flask_app.route("/health", methods=["GET"])
 def health_check():
-    return {"status": "healthy", "service": "Sara Bot"}, 200
+    return {
+        "status": "healthy", 
+        "service": "Sara Bot",
+        "timestamp": "2025-07-29T07:49:03.123456",
+        "version": "1.0.0"
+    }, 200
 
 
 @flask_app.route("/", methods=["GET"])
 def home():
     return {"message": "Sara Bot is running!", "status": "active"}, 200
+
+
+# ─── Register Event Handlers ─────────────────────────────────────────────
+# Register event handlers if app is initialized
+if app:
+    app.event("app_mention")(route_mention)
+    app.event("message")(handle_all_messages)
+    print("✅ Slack event handlers registered")
 
 
 # ─── Start the Flask App ─────────────────────────────────────────────────
