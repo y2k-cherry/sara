@@ -37,18 +37,84 @@ class EmailService:
                 self.openai_client = openai.OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
             except Exception as e:
                 print(f"⚠️  OpenAI client initialization failed in email_service: {e}")
-                # Create a mock client that returns basic email content
+                # Create a mock client that tries to parse the message manually
                 print("⚠️  Using mock OpenAI client for email service")
+                def mock_create(*args, **kwargs):
+                    # Try to extract basic info from the message
+                    messages = kwargs.get('messages', [])
+                    user_message = ""
+                    for msg in messages:
+                        if isinstance(msg, dict) and msg.get('role') == 'user':
+                            user_message = msg.get('content', '')
+                            break
+                    
+                    # Manual extraction for email details
+                    import re
+                    
+                    # Extract email addresses
+                    email_pattern = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
+                    emails = re.findall(email_pattern, user_message)
+                    
+                    # Extract purpose - look for "saying", "about", quoted content
+                    purpose = ""
+                    is_verbatim = False
+                    custom_subject = ""
+                    
+                    # Check for quoted content (verbatim)
+                    quote_match = re.search(r"saying\s+['\"]([^'\"]+)['\"]", user_message, re.IGNORECASE)
+                    if quote_match:
+                        purpose = quote_match.group(1)
+                        is_verbatim = True
+                    else:
+                        # Check for "about" pattern
+                        about_match = re.search(r"about\s+(.+?)(?:\s+and\s+subject|$)", user_message, re.IGNORECASE)
+                        if about_match:
+                            purpose = about_match.group(1).strip()
+                        else:
+                            # Check for "saying" without quotes
+                            saying_match = re.search(r"saying\s+(.+?)(?:\s+and\s+subject|$)", user_message, re.IGNORECASE)
+                            if saying_match:
+                                purpose = saying_match.group(1).strip()
+                    
+                    # Extract custom subject
+                    subject_match = re.search(r"subject\s+is\s+['\"]([^'\"]+)['\"]", user_message, re.IGNORECASE)
+                    if subject_match:
+                        custom_subject = subject_match.group(1)
+                    
+                    # If this is a composition request, return email content
+                    if "compose" in user_message.lower() or "subject line" in user_message.lower():
+                        # This is an email composition request
+                        subject = custom_subject if custom_subject else "Message from Yash Kewalramani"
+                        body = f"Hi,\n\n{purpose}\n\nBest regards,\nYash Kewalramani"
+                        return type('Response', (), {
+                            'choices': [type('Choice', (), {
+                                'message': type('Message', (), {
+                                    'content': json.dumps({"subject": subject, "body": body})
+                                })()
+                            })()]
+                        })()
+                    else:
+                        # This is an extraction request
+                        result = {
+                            "purpose": purpose,
+                            "recipient_emails": emails,
+                            "recipient_names": [],
+                            "custom_subject": custom_subject,
+                            "is_verbatim": is_verbatim,
+                            "additional_context": ""
+                        }
+                        return type('Response', (), {
+                            'choices': [type('Choice', (), {
+                                'message': type('Message', (), {
+                                    'content': json.dumps(result)
+                                })()
+                            })()]
+                        })()
+                
                 self.openai_client = type('MockClient', (), {
                     'chat': type('Chat', (), {
                         'completions': type('Completions', (), {
-                            'create': lambda *args, **kwargs: type('Response', (), {
-                                'choices': [type('Choice', (), {
-                                    'message': type('Message', (), {
-                                        'content': '{"subject": "Message from Yash Kewalramani", "body": "Hi,\\n\\nI hope this email finds you well.\\n\\nBest regards,\\nYash Kewalramani"}'
-                                    })()
-                                })()]
-                            })()
+                            'create': mock_create
                         })()
                     })()
                 })()

@@ -35,18 +35,75 @@ def get_openai_client():
             openai_client = OpenAI(api_key=OPENAI_API_KEY)
         except Exception as e:
             print(f"⚠️  OpenAI client initialization failed in agreement_service: {e}")
-            # Create a mock client that returns basic JSON structure
+            # Create a mock client that tries to parse the message manually
             print("⚠️  Using mock OpenAI client for agreement service")
+            def mock_create(*args, **kwargs):
+                # Try to extract basic info from the message
+                messages = kwargs.get('messages', [])
+                user_message = ""
+                for msg in messages:
+                    if msg.get('role') == 'user':
+                        user_message = msg.get('content', '')
+                        break
+                
+                # Manual field extraction from the message
+                import re
+                
+                # Extract brand name
+                brand_match = re.search(r'(?:for|with|brand)\s+([A-Za-z0-9\s&]+?)(?:,|$|\s+Legal)', user_message, re.IGNORECASE)
+                brand_name = brand_match.group(1).strip() if brand_match else ""
+                
+                # Extract legal name/company name
+                legal_match = re.search(r'Legal name:\s*([^,]+)', user_message, re.IGNORECASE)
+                company_name = legal_match.group(1).strip() if legal_match else ""
+                
+                # Extract address
+                address_match = re.search(r'Address:\s*([^.]+\.)', user_message, re.IGNORECASE)
+                company_address = address_match.group(1).strip() if address_match else ""
+                
+                # Extract deposit
+                deposit_match = re.search(r'Deposit:\s*Rs\.?\s*([0-9,]+)', user_message, re.IGNORECASE)
+                deposit = deposit_match.group(1).replace(',', '') if deposit_match else ""
+                
+                # Extract fee
+                fee_match = re.search(r'Fee[:\s]*Rs\.?\s*([0-9,]+)', user_message, re.IGNORECASE)
+                flat_fee = fee_match.group(1).replace(',', '') if fee_match else ""
+                
+                # Extract industry/field
+                field_match = re.search(r'Field:\s*([^,\n]+)', user_message, re.IGNORECASE)
+                industry = field_match.group(1).strip() if field_match else ""
+                
+                # Convert deposit to words
+                deposit_in_words = ""
+                if deposit:
+                    try:
+                        deposit_num = int(deposit)
+                        deposit_in_words = convert_number_to_words(str(deposit_num))
+                    except:
+                        pass
+                
+                result_json = {
+                    "brand_name": brand_name,
+                    "company_name": company_name,
+                    "company_address": company_address,
+                    "industry": industry,
+                    "flat_fee": flat_fee,
+                    "deposit": deposit,
+                    "deposit_in_words": deposit_in_words
+                }
+                
+                return type('Response', (), {
+                    'choices': [type('Choice', (), {
+                        'message': type('Message', (), {
+                            'content': json.dumps(result_json)
+                        })()
+                    })()]
+                })()
+            
             openai_client = type('MockClient', (), {
                 'chat': type('Chat', (), {
                     'completions': type('Completions', (), {
-                        'create': lambda *args, **kwargs: type('Response', (), {
-                            'choices': [type('Choice', (), {
-                                'message': type('Message', (), {
-                                    'content': '{"brand_name": "Unknown Brand", "company_name": "", "company_address": "", "industry": "", "flat_fee": "", "deposit": "", "deposit_in_words": ""}'
-                                })()
-                            })()]
-                        })()
+                        'create': mock_create
                     })()
                 })()
             })()
