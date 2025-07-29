@@ -39,6 +39,37 @@ def get_intent_from_text(text: str) -> str:
     Uses LLM to classify the user's intent.
     Returns one of: 'generate_agreement', 'get_status', 'get_payment_info', 'lookup_sheets', 'send_email', 'unknown'
     """
+    # First try basic pattern matching for common intents (fallback when OpenAI fails)
+    text_lower = text.lower().strip()
+    
+    # Check for agreement generation
+    if any(word in text_lower for word in ['generate agreement', 'create agreement', 'agreement for']):
+        return 'generate_agreement'
+    
+    # Check for email sending
+    if any(word in text_lower for word in ['send email', 'email to', 'send an email', 'draft email', 'compose email']):
+        return 'send_email'
+    
+    # Check for sheets/payment queries
+    payment_patterns = ["who hasn't paid", "who has not paid", "unpaid brands", "negative balance", "outstanding balance", "who owes", "payment due"]
+    sheets_patterns = ["sheet", "spreadsheet", "data", "brands", "how many", "count", "analyze", "lookup", "check"]
+    
+    if any(pattern in text_lower for pattern in payment_patterns):
+        return 'lookup_sheets'
+    
+    if any(pattern in text_lower for pattern in sheets_patterns):
+        return 'lookup_sheets'
+    
+    # Check for status queries
+    if any(word in text_lower for word in ['status', 'current status', 'what\'s the status']):
+        return 'get_status'
+    
+    # Check for help requests
+    help_patterns = ['help', 'what can you do', 'what all can you do', 'capabilities', 'functions', 'services', 'how can you help']
+    if any(pattern in text_lower for pattern in help_patterns):
+        return 'help'
+    
+    # Try OpenAI if basic patterns don't match
     prompt = f"""
 You are a Slack bot assistant. Classify the intent of the following message from a user.
 
@@ -84,11 +115,14 @@ Examples of help intent:
 - Any question asking about Sara's capabilities or functionality
 """
 
-    openai_client = get_openai_client()
-    response = openai_client.chat.completions.create(
-        model="gpt-4",  # or "gpt-3.5-turbo"
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0,
-    )
-
-    return response.choices[0].message.content.strip()
+    try:
+        openai_client = get_openai_client()
+        response = openai_client.chat.completions.create(
+            model="gpt-4",  # or "gpt-3.5-turbo"
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0,
+        )
+        return response.choices[0].message.content.strip()
+    except:
+        # If OpenAI fails completely, return 'unknown' instead of always 'help'
+        return 'unknown'
