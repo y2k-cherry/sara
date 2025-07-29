@@ -22,7 +22,7 @@ def get_openai_client():
             client = type('MockClient', (), {
                 'chat': type('Chat', (), {
                     'completions': type('Completions', (), {
-                        'create': lambda **kwargs: type('Response', (), {
+                        'create': lambda *args, **kwargs: type('Response', (), {
                             'choices': [type('Choice', (), {
                                 'message': type('Message', (), {
                                     'content': 'help'  # Default to help intent

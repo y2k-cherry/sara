@@ -42,7 +42,7 @@ class EmailService:
                 self.openai_client = type('MockClient', (), {
                     'chat': type('Chat', (), {
                         'completions': type('Completions', (), {
-                            'create': lambda **kwargs: type('Response', (), {
+                            'create': lambda *args, **kwargs: type('Response', (), {
                                 'choices': [type('Choice', (), {
                                     'message': type('Message', (), {
                                         'content': '{"subject": "Message from Yash Kewalramani", "body": "Hi,\\n\\nI hope this email finds you well.\\n\\nBest regards,\\nYash Kewalramani"}'

@@ -40,7 +40,7 @@ class DirectSheetsService:
                 self.openai_client = type('MockClient', (), {
                     'chat': type('Chat', (), {
                         'completions': type('Completions', (), {
-                            'create': lambda **kwargs: type('Response', (), {
+                            'create': lambda *args, **kwargs: type('Response', (), {
                                 'choices': [type('Choice', (), {
                                     'message': type('Message', (), {
                                         'content': 'I can see the sheet data but cannot analyze it due to OpenAI client issues. The sheet contains data that can be accessed.'
