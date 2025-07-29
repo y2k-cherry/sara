@@ -224,15 +224,24 @@ Just mention me with `@Sara` and ask away! 🚀"""
 # ─── Flask Routes for Slack Events ───────────────────────────────────────
 @flask_app.route("/slack/events", methods=["POST"])
 def slack_events():
-    # Handle Slack URL verification challenge
-    if request.json and "challenge" in request.json:
-        return {"challenge": request.json["challenge"]}
-    
-    # Handle regular Slack events
-    if handler:
-        return handler.handle(request)
-    else:
-        return {"error": "Slack handler not initialized"}, 500
+    try:
+        # Handle Slack URL verification challenge
+        if request.json and "challenge" in request.json:
+            challenge = request.json["challenge"]
+            print(f"✅ Slack challenge received: {challenge}")
+            return {"challenge": challenge}, 200
+        
+        # Handle regular Slack events
+        if handler:
+            print("📨 Processing Slack event...")
+            return handler.handle(request)
+        else:
+            print("❌ Slack handler not initialized")
+            return {"error": "Slack handler not initialized"}, 500
+            
+    except Exception as e:
+        print(f"❌ Error in slack_events endpoint: {e}")
+        return {"error": str(e)}, 500
 
 
 @flask_app.route("/health", methods=["GET"])
@@ -248,6 +257,17 @@ def health_check():
 @flask_app.route("/", methods=["GET"])
 def home():
     return {"message": "Sara Bot is running!", "status": "active"}, 200
+
+
+@flask_app.route("/slack/events", methods=["GET"])
+def slack_events_get():
+    """Handle GET requests to /slack/events for debugging"""
+    return {
+        "message": "Slack events endpoint is working",
+        "method": "GET",
+        "slack_handler_initialized": handler is not None,
+        "slack_app_initialized": slack_app is not None
+    }, 200
 
 
 # ─── Register Event Handlers ─────────────────────────────────────────────
