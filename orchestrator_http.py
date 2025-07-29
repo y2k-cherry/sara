@@ -50,10 +50,14 @@ except Exception as e:
 
 # ─── Function: route_mention ─────────────────────────────────────────────
 def route_mention(event, say):
+    print(f"🎯 route_mention called with event: {event}")
     raw_text = event["text"]
     cleaned_text = clean_slack_text(raw_text).lower()
+    print(f"🎯 Raw text: {raw_text}")
+    print(f"🎯 Cleaned text: {cleaned_text}")
 
     intent = get_intent_from_text(cleaned_text)
+    print(f"🎯 Detected intent: {intent}")
 
     if intent == "generate_agreement":
         handle_agreement(event, say)
@@ -225,6 +229,11 @@ Just mention me with `@Sara` and ask away! 🚀"""
 @flask_app.route("/slack/events", methods=["POST"])
 def slack_events():
     try:
+        # Log all incoming requests for debugging
+        print(f"🔍 Received POST to /slack/events")
+        print(f"🔍 Request headers: {dict(request.headers)}")
+        print(f"🔍 Request data: {request.get_data(as_text=True)}")
+        
         # Handle Slack URL verification challenge
         if request.json and "challenge" in request.json:
             challenge = request.json["challenge"]
@@ -233,14 +242,24 @@ def slack_events():
         
         # Handle regular Slack events
         if handler:
-            print("📨 Processing Slack event...")
-            return handler.handle(request)
+            print("📨 Processing Slack event with handler...")
+            try:
+                result = handler.handle(request)
+                print(f"✅ Handler processed event successfully: {result}")
+                return result
+            except Exception as handler_error:
+                print(f"❌ Handler error: {handler_error}")
+                import traceback
+                print(f"❌ Handler traceback: {traceback.format_exc()}")
+                return {"error": f"Handler error: {str(handler_error)}"}, 500
         else:
             print("❌ Slack handler not initialized")
             return {"error": "Slack handler not initialized"}, 500
             
     except Exception as e:
         print(f"❌ Error in slack_events endpoint: {e}")
+        import traceback
+        print(f"❌ Full traceback: {traceback.format_exc()}")
         return {"error": str(e)}, 500
 
 
