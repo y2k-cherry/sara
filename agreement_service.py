@@ -65,8 +65,8 @@ def get_openai_client():
                 deposit_match = re.search(r'Deposit:\s*Rs\.?\s*([0-9,]+)', user_message, re.IGNORECASE)
                 deposit = deposit_match.group(1).replace(',', '') if deposit_match else ""
                 
-                # Extract fee
-                fee_match = re.search(r'Fee[:\s]*Rs\.?\s*([0-9,]+)', user_message, re.IGNORECASE)
+                # Extract fee - handle both "Fee" and "Flat Fee"
+                fee_match = re.search(r'(?:Flat\s+)?Fee[:\s]*Rs\.?\s*([0-9,]+)', user_message, re.IGNORECASE)
                 flat_fee = fee_match.group(1).replace(',', '') if fee_match else ""
                 
                 # Extract industry/field

@@ -25,8 +25,9 @@ class DirectSheetsService:
         # Try to load OAuth credentials for private sheet access
         self._load_oauth_credentials()
         
+        # Don't raise error if neither is available - just log warning
         if not self.api_key and not self.oauth_credentials:
-            raise ValueError("Neither GOOGLE_API_KEY nor OAuth credentials found")
+            print("⚠️  Neither GOOGLE_API_KEY nor OAuth credentials found - sheets access will be limited")
     
     def _get_openai_client(self):
         """Get OpenAI client with lazy initialization"""
@@ -469,14 +470,18 @@ Provide a brief, direct answer. Do not suggest manual formulas or explain how th
         try:
             # Check if this is a payment status query
             payment_patterns = [
-                "who hasn't paid", "who has not paid", "unpaid brands", "negative balance",
+                "who hasn't paid", "who hasnt paid", "who has not paid", "unpaid brands", "negative balance",
                 "outstanding balance", "who owes", "brands that owe", "payment due",
-                "overdue", "brands with negative", "who needs to pay"
+                "overdue", "brands with negative", "who needs to pay", "havent paid", "haven't paid"
             ]
             is_payment_query = any(pattern in query.lower() for pattern in payment_patterns)
             
             if is_payment_query:
                 return self._check_brand_balances(query)
+            
+            # For non-payment queries, we need a sheet URL/ID
+            if not sheet_url_or_id:
+                return "Please provide a Google Sheets URL or specify what you'd like me to look up."
             
             # Extract sheet ID
             sheet_id = self.extract_sheet_id(sheet_url_or_id)

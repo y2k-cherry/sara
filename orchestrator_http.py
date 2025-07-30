@@ -46,7 +46,12 @@ try:
     print("✅ Direct Sheets Service initialized")
 except Exception as e:
     print(f"⚠️  Direct Sheets Service failed to initialize: {e}")
-    direct_sheets = None
+    print("⚠️  Creating fallback DirectSheetsService...")
+    # Create a minimal fallback service
+    class FallbackDirectSheetsService:
+        def process_sheets_query(self, sheet_url, query):
+            return "I couldn't connect to Google Drive. Please run the authentication setup: `python3 setup_auth.py`"
+    direct_sheets = FallbackDirectSheetsService()
 
 # ─── Function: route_mention ─────────────────────────────────────────────
 def route_mention(event, say):
