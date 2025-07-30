@@ -65,9 +65,23 @@ def get_openai_client():
                 deposit_match = re.search(r'Deposit:\s*Rs\.?\s*([0-9,]+)', user_message, re.IGNORECASE)
                 deposit = deposit_match.group(1).replace(',', '') if deposit_match else ""
                 
-                # Extract fee - handle both "Fee" and "Flat Fee"
-                fee_match = re.search(r'(?:Flat\s+)?Fee[:\s]*Rs\.?\s*([0-9,]+)', user_message, re.IGNORECASE)
-                flat_fee = fee_match.group(1).replace(',', '') if fee_match else ""
+                # Extract fee - handle multiple separators including semicolon
+                fee_patterns = [
+                    r'Flat\s+Fee[;\s:]*Rs\.?\s*([0-9,]+)',
+                    r'(?:Flat\s+)?Fee[;\s:]*Rs\.?\s*([0-9,]+)',
+                    r'Fee[;\s:]*Rs\.?\s*([0-9,]+)',
+                    r'Rs\.?\s*([0-9,]+).*(?:fee|Fee)'
+                ]
+                flat_fee = ""
+                for pattern in fee_patterns:
+                    fee_match = re.search(pattern, user_message, re.IGNORECASE)
+                    if fee_match:
+                        flat_fee = fee_match.group(1).replace(',', '')
+                        print(f"🔍 DEBUG: Mock client found fee with pattern '{pattern}': {flat_fee}")
+                        break
+                
+                if not flat_fee:
+                    print(f"🔍 DEBUG: Mock client could not find fee in message: {user_message}")
                 
                 # Extract industry/field
                 field_match = re.search(r'Field:\s*([^,\n]+)', user_message, re.IGNORECASE)
@@ -194,6 +208,14 @@ def convert_number_to_words(number_str: str) -> str:
 
 
 def extract_agreement_fields(message_text: str):
+    print(f"🔍 DEBUG: Starting field extraction for message: {message_text[:100]}...")
+    
+    # Check environment variables
+    openai_key = os.getenv("OPENAI_API_KEY")
+    print(f"🔍 DEBUG: OpenAI API key present: {bool(openai_key)}")
+    if openai_key:
+        print(f"🔍 DEBUG: OpenAI API key length: {len(openai_key)}")
+    
     sys_prompt = (
         "You are Sara, a sales ops AI assistant. Extract agreement details from this message "
         "and return ONLY raw JSON (no markdown, no code fences) with keys: "
@@ -206,7 +228,17 @@ def extract_agreement_fields(message_text: str):
     )
 
     try:
+        print("🔍 DEBUG: Attempting to get OpenAI client...")
         client = get_openai_client()
+        print(f"🔍 DEBUG: OpenAI client type: {type(client)}")
+        
+        # Check if this is the mock client
+        if hasattr(client, 'chat') and hasattr(client.chat, 'completions'):
+            if hasattr(client.chat.completions, 'create'):
+                print("🔍 DEBUG: Using OpenAI client (real or mock)")
+            else:
+                print("🔍 DEBUG: Client structure unexpected")
+        
         chat = client.chat.completions.create(
             model="gpt-4o",
             messages=[
@@ -216,12 +248,14 @@ def extract_agreement_fields(message_text: str):
             temperature=0.1  # Lower temperature for more consistent JSON output
         )
         content = chat.choices[0].message.content.strip()
+        print(f"🔍 DEBUG: OpenAI response: {content}")
 
         # If GPT prepended text, extract just the JSON object
         # This regex grabs the first {...} block in the response
         import re
         m = re.search(r"(\{.*\})", content, re.DOTALL)
         if not m:
+            print("🔍 DEBUG: No JSON found in OpenAI response, using fallback")
             # Fallback: try to create a basic JSON with just the brand name
             brand_match = re.search(r'(?:for|with|brand)\s+([A-Za-z0-9\s]+)', message_text, re.IGNORECASE)
             if brand_match:
@@ -235,18 +269,25 @@ def extract_agreement_fields(message_text: str):
                     "deposit": "",
                     "deposit_in_words": ""
                 }
+                print(f"🔍 DEBUG: Fallback data: {fallback_data}")
                 return fallback_data, [f for f in REQUIRED_FIELDS if f != "brand_name"]
             else:
                 raise ValueError(f"GPT did not return JSON. Full response:\n{content!r}")
         
         json_str = m.group(1)
+        print(f"🔍 DEBUG: Extracted JSON string: {json_str}")
 
         try:
             data = json.loads(json_str)
+            print(f"🔍 DEBUG: Parsed JSON data: {data}")
         except Exception as e:
+            print(f"🔍 DEBUG: JSON parsing failed: {e}")
             raise ValueError(f"Invalid JSON from GPT:\n{json_str}\nError: {e}")
     
     except Exception as e:
+        print(f"🔍 DEBUG: OpenAI call failed: {e}")
+        print("🔍 DEBUG: Using manual extraction fallback")
+        
         # If OpenAI call fails completely, try to extract brand name manually
         brand_match = re.search(r'(?:for|with|brand)\s+([A-Za-z0-9\s]+)', message_text, re.IGNORECASE)
         if brand_match:
@@ -260,8 +301,10 @@ def extract_agreement_fields(message_text: str):
                 "deposit": "",
                 "deposit_in_words": ""
             }
+            print(f"🔍 DEBUG: Manual extraction fallback data: {fallback_data}")
             return fallback_data, [f for f in REQUIRED_FIELDS if f != "brand_name"]
         else:
+            print("🔍 DEBUG: Could not extract brand name manually")
             raise e
 
     data["start_date"] = str(date.today())
@@ -271,6 +314,9 @@ def extract_agreement_fields(message_text: str):
         data["deposit_in_words"] = convert_number_to_words(data["deposit"])
     
     missing = [f for f in REQUIRED_FIELDS if not data.get(f)]
+    print(f"🔍 DEBUG: Final extracted data: {data}")
+    print(f"🔍 DEBUG: Missing fields: {missing}")
+    
     return data, missing
 
 
