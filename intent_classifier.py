@@ -37,10 +37,38 @@ def get_openai_client():
 def get_intent_from_text(text: str) -> str:
     """
     Uses LLM to classify the user's intent.
-    Returns one of: 'generate_agreement', 'get_status', 'get_payment_info', 'lookup_sheets', 'send_email', 'unknown'
+    Returns one of: 'generate_agreement', 'get_status', 'get_payment_info', 'lookup_sheets', 'send_email', 'brand_info', 'unknown'
     """
     # First try basic pattern matching for common intents (fallback when OpenAI fails)
     text_lower = text.lower().strip()
+    
+    # Check for brand information queries
+    brand_info_patterns = [
+        'fetch', 'info', 'gst number', 'gst details', 'brand id', 'show me info for',
+        'what\'s', 'what is', 'do we have', 'brand information', 'company info'
+    ]
+    brand_keywords = ['freakins', 'yama yoga', 'fae', 'inde wild', 'theater']
+    
+    # Check if it's a brand info query
+    has_brand_pattern = any(pattern in text_lower for pattern in brand_info_patterns)
+    has_brand_keyword = any(keyword in text_lower for keyword in brand_keywords)
+    
+    # Specific patterns for brand queries
+    specific_brand_patterns = [
+        r'fetch\s+\w+\s+info',
+        r'show\s+me\s+info\s+for\s+\w+',
+        r'what\'?s\s+\w+\'?s?\s+gst',
+        r'do\s+we\s+have\s+\w+\'?s?\s+gst',
+        r'what\s+is\s+\w+\'?s?\s+brand\s+id',
+        r'\w+\s+info',
+        r'info\s+for\s+\w+'
+    ]
+    
+    import re
+    has_specific_pattern = any(re.search(pattern, text_lower) for pattern in specific_brand_patterns)
+    
+    if has_brand_pattern or has_brand_keyword or has_specific_pattern:
+        return 'brand_info'
     
     # Check for agreement generation
     if any(word in text_lower for word in ['generate agreement', 'create agreement', 'agreement for']):

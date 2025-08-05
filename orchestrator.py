@@ -10,6 +10,7 @@ from status_service import read_google_doc_text
 from sheets_service import sheets_service
 from direct_sheets_service import DirectSheetsService
 from email_service import handle_email_request, handle_email_confirmation
+from brand_info_service import BrandInfoService
 
 
 # 1️⃣ Load environment variables early
@@ -29,6 +30,14 @@ try:
 except Exception as e:
     print(f"⚠️  Direct Sheets Service failed to initialize: {e}")
     direct_sheets = None
+
+# 5️⃣ Initialize Brand Info Service
+try:
+    brand_info_service = BrandInfoService()
+    print("✅ Brand Info Service initialized")
+except Exception as e:
+    print(f"⚠️  Brand Info Service failed to initialize: {e}")
+    brand_info_service = None
 
 
 # ─── Function: route_mention ─────────────────────────────────────────────
@@ -75,12 +84,27 @@ def route_mention(event, say):
     elif intent == "send_email":
         say("📧 Composing email...", thread_ts=event["ts"])
         handle_email_request(event, say)
+    elif intent == "brand_info":
+        say("🔍 Looking up brand information...", thread_ts=event["ts"])
+        try:
+            if brand_info_service:
+                response = brand_info_service.process_brand_query(cleaned_text)
+                say(f"🏢 {response}", thread_ts=event["ts"])
+            else:
+                say("❌ Brand information service is not available.", thread_ts=event["ts"])
+        except Exception as e:
+            say(f"❌ Error looking up brand information: {str(e)}", thread_ts=event["ts"])
     elif intent == "help":
         help_message = """👋 **Hi! I'm Sara, your AI assistant. Here's what I can help you with:**
 
 🤝 **Partnership Agreements**
 • Generate custom partnership agreements
 • *Example: "Generate an agreement for XYZ Company"*
+
+🏢 **Brand Information**
+• Fetch detailed brand information from the Brand Master sheet
+• Get GST numbers, brand IDs, and other company details
+• *Examples: "fetch Freakins info", "What's FAE's GST number", "Show me info for Yama Yoga"*
 
 📊 **Google Sheets & Data Analysis**
 • Analyze spreadsheet data and answer questions
@@ -101,6 +125,7 @@ def route_mention(event, say):
 • You can share Google Sheets URLs for specific analysis
 • I can access both public and private sheets (with proper permissions)
 • Payment queries automatically check the Brand Balances sheet
+• Brand queries use fuzzy matching to find similar names
 
 Just mention me with `@Sara` and ask away! 🚀"""
         say(help_message, thread_ts=event["ts"])
@@ -146,6 +171,15 @@ def handle_all_messages(body, say, client, logger):
             say("📊 Status checks coming soon!", thread_ts=thread_ts)
         elif intent == "send_email":
             handle_email_request({**event, "text": combined_text}, say)
+        elif intent == "brand_info":
+            try:
+                if brand_info_service:
+                    response = brand_info_service.process_brand_query(cleaned_text)
+                    say(f"🏢 {response}", thread_ts=thread_ts)
+                else:
+                    say("❌ Brand information service is not available.", thread_ts=thread_ts)
+            except Exception as e:
+                say(f"❌ Error looking up brand information: {str(e)}", thread_ts=thread_ts)
         elif intent == "lookup_sheets":
             try:
                 if direct_sheets:
