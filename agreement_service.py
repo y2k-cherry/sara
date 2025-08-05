@@ -407,12 +407,16 @@ def fill_docx_template(values: dict, output_path: str):
     Open the .docx template, replace placeholders like {{brand_name}},
     and save to output_path.
     """
+    import html
+    
     doc = Document(TEMPLATE_PATH)
     for p in doc.paragraphs:
         for key, val in values.items():
             placeholder = f"{{{{{key}}}}}"
             if placeholder in p.text:
-                p.text = p.text.replace(placeholder, str(val))
+                # Decode HTML entities like &amp; to &
+                decoded_val = html.unescape(str(val))
+                p.text = p.text.replace(placeholder, decoded_val)
     doc.save(output_path)
 
 
@@ -425,6 +429,9 @@ def handle_agreement(event, say):
     raw = event["text"]
     thread_ts = event.get("thread_ts") or event["ts"]
     channel   = event["channel"]
+
+    # Send acknowledgement message first
+    say("🤖 Got it - working on your agreement! ⚡", thread_ts=thread_ts)
 
     # clean and extract
     cleaned, _ = clean_text(raw), None
