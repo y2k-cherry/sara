@@ -35,15 +35,15 @@ class EmailService:
         try:
             # Simple direct extraction - no AI needed
             
-            # Extract the recipient email - look for "to" followed by email
-            recipient_match = re.search(r'to\s+([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,})', message_text, re.IGNORECASE)
+            # Extract the recipient email - look for "to" followed by email OR "email" followed by email
+            recipient_match = re.search(r'(?:to|email)\s+([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,})', message_text, re.IGNORECASE)
             recipient_email = recipient_match.group(1) if recipient_match else ""
             
-            # Extract purpose - look for "saying" with quotes or without
+            # Extract purpose - look for multiple patterns
             purpose = ""
             is_verbatim = False
             
-            # Check for quoted content (verbatim)
+            # Check for quoted content (verbatim) with "saying"
             quote_match = re.search(r"saying\s+['\"]([^'\"]+)['\"]", message_text, re.IGNORECASE)
             if quote_match:
                 purpose = quote_match.group(1)
@@ -53,6 +53,20 @@ class EmailService:
                 saying_match = re.search(r"saying\s+(.+?)(?:\s*$)", message_text, re.IGNORECASE)
                 if saying_match:
                     purpose = saying_match.group(1).strip()
+                else:
+                    # Check for "about" pattern
+                    about_match = re.search(r"about\s+(.+?)(?:\s*$)", message_text, re.IGNORECASE)
+                    if about_match:
+                        purpose = about_match.group(1).strip()
+                    else:
+                        # Check for "regarding" pattern
+                        regarding_match = re.search(r"regarding\s+(.+?)(?:\s*$)", message_text, re.IGNORECASE)
+                        if regarding_match:
+                            purpose = regarding_match.group(1).strip()
+                        else:
+                            # If we have an email but no clear purpose, use a default
+                            if recipient_email:
+                                purpose = "Hello"
             
             # Extract custom subject
             subject_match = re.search(r"subject\s+is\s+['\"]([^'\"]+)['\"]", message_text, re.IGNORECASE)
