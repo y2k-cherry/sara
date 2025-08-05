@@ -238,10 +238,23 @@ def extract_agreement_fields(message_text: str):
         "You are Sara, a sales ops AI assistant. Extract agreement details from this message "
         "and return ONLY raw JSON (no markdown, no code fences) with keys: "
         "brand_name, company_name, company_address, industry, flat_fee, deposit, deposit_in_words. "
-        "If information is missing, use empty strings for missing fields. "
+        
+        "CRITICAL FIELD DISTINCTION RULES:\n"
+        "- 'deposit' is ONLY the amount explicitly labeled as 'Deposit:' in the message\n"
+        "- 'flat_fee' is ONLY the amount explicitly labeled as 'Flat Fee:', 'Fee:', or similar fee-related terms\n"
+        "- NEVER use the deposit amount as the flat fee, even if flat fee is missing\n"
+        "- NEVER use the flat fee amount as the deposit, even if deposit is missing\n"
+        "- If either field is not explicitly mentioned, leave it as an empty string\n"
+        
+        "EXAMPLES:\n"
+        "- 'Deposit: Rs 10,000, Flat Fee: Rs 320' → deposit='10000', flat_fee='320'\n"
+        "- 'Deposit: Rs 10,000' (no fee mentioned) → deposit='10000', flat_fee=''\n"
+        "- 'Flat Fee: Rs 320' (no deposit mentioned) → deposit='', flat_fee='320'\n"
+        
         "For brand_name, extract it from the message even if other details are missing. "
         "If you find a deposit amount in numbers, automatically convert it to words for deposit_in_words. "
         "For example: 10000 becomes 'ten thousand', 50000 becomes 'fifty thousand'. "
+        "If information is missing, use empty strings for missing fields. "
         "ALWAYS return valid JSON, never explanatory text."
     )
 
@@ -330,44 +343,34 @@ def extract_agreement_fields(message_text: str):
                 data["company_address"] = address_match.group(1).strip()
                 break
         
-        # Extract deposit
+        # Extract deposit - ONLY from explicit "Deposit:" labels
         deposit_match = re.search(r'Deposit:\s*Rs\.?\s*([0-9,]+)', message_text, re.IGNORECASE)
         data["deposit"] = deposit_match.group(1).replace(',', '') if deposit_match else ""
+        print(f"🔍 DEBUG: Manual extraction deposit: '{data['deposit']}'")
         
-        # Extract fee with enhanced patterns
+        # Extract fee - ONLY from explicit fee-related labels, NEVER use deposit amount
         fee_patterns = [
-            r'Flat\s+Fee[;\s:,]*Rs\.?\s*([0-9,]+)',
-            r'(?:Flat\s+)?Fee[;\s:,]*Rs\.?\s*([0-9,]+)',
-            r'Fee[;\s:,]*Rs\.?\s*([0-9,]+)',
-            r'Rs\.?\s*([0-9,]+).*(?:fee|Fee)',
-            r'Rs\.?\s*([0-9,]+)(?:\s*[,.]|\s*$)',
-            r'(?:fee|Fee)[;\s:,]*Rs\.?\s*([0-9,]+)',
-            r'([0-9,]+)\s*(?:rs|Rs|RS)\.?\s*(?:fee|Fee)',
+            r'Flat\s+Fee[;\s:,]*Rs\.?\s*([0-9,]+)',  # "Flat Fee: Rs 320"
+            r'(?:Flat\s+)?Fee[;\s:,]*Rs\.?\s*([0-9,]+)',  # "Fee: Rs 320"
+            r'Commission[;\s:,]*Rs\.?\s*([0-9,]+)',  # "Commission: Rs 320"
+            r'Rate[;\s:,]*Rs\.?\s*([0-9,]+)',  # "Rate: Rs 320"
         ]
         data["flat_fee"] = ""
         for i, pattern in enumerate(fee_patterns):
             fee_match = re.search(pattern, message_text, re.IGNORECASE)
             if fee_match:
-                data["flat_fee"] = fee_match.group(1).replace(',', '')
-                print(f"🔍 DEBUG: Manual extraction found fee with pattern {i+1}: {data['flat_fee']}")
-                break
+                potential_fee = fee_match.group(1).replace(',', '')
+                # Double-check this isn't the same as the deposit amount
+                if potential_fee != data["deposit"]:
+                    data["flat_fee"] = potential_fee
+                    print(f"🔍 DEBUG: Manual extraction found fee with pattern {i+1}: {data['flat_fee']}")
+                    break
+                else:
+                    print(f"🔍 DEBUG: Rejected fee candidate '{potential_fee}' - matches deposit amount")
         
-        # If still no fee found, try aggressive patterns
+        # NO aggressive fallback patterns that might confuse deposit with fee
         if not data["flat_fee"]:
-            aggressive_patterns = [
-                r'(\d+)\s*(?:rs|Rs|RS)',
-                r'Rs\.?\s*(\d+)',
-                r'(\d+).*(?:fee|Fee)',
-            ]
-            for i, pattern in enumerate(aggressive_patterns):
-                fee_match = re.search(pattern, message_text, re.IGNORECASE)
-                if fee_match:
-                    potential_fee = fee_match.group(1)
-                    # Only accept if it's a reasonable fee amount (not deposit-like)
-                    if int(potential_fee) < 10000:
-                        data["flat_fee"] = potential_fee
-                        print(f"🔍 DEBUG: Manual extraction found fee with aggressive pattern {i+1}: {data['flat_fee']}")
-                        break
+            print("🔍 DEBUG: No explicit fee found in manual extraction - leaving empty")
         
         # Extract industry/field
         field_match = re.search(r'Field:\s*([^,\n]+)', message_text, re.IGNORECASE)
