@@ -51,9 +51,26 @@ class EmailService:
                     # Manual extraction for email details
                     import re
                     
-                    # Extract email addresses
-                    email_pattern = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
-                    emails = re.findall(email_pattern, user_message)
+                    # Extract email addresses - but only from the actual user message, not examples
+                    # Look for patterns like "send email to X" or "email X"
+                    email_pattern = r'(?:send\s+email\s+to\s+|email\s+)([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,})'
+                    email_matches = re.findall(email_pattern, user_message, re.IGNORECASE)
+                    
+                    # If no matches with context, try direct email extraction but filter out common test domains
+                    if not email_matches:
+                        all_emails = re.findall(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b', user_message)
+                        # Filter out test emails and only keep real emails
+                        test_domains = ['test.com', 'company.com', 'business.com', 'example.com']
+                        real_emails = [email for email in all_emails if not any(domain in email for domain in test_domains)]
+                        
+                        # If we have real emails, use only the first one
+                        if real_emails:
+                            email_matches = real_emails[:1]
+                        else:
+                            # If no real emails found, don't include any test emails
+                            email_matches = []
+                    
+                    emails = email_matches
                     
                     # Extract purpose - look for "saying", "about", quoted content
                     purpose = ""
@@ -142,9 +159,9 @@ Extract and return ONLY a JSON object with these keys:
 - additional_context: Any additional context or details mentioned
 
 Examples:
-- "send email to john@test.com saying 'Hello there'" → purpose: "Hello there", is_verbatim: true
-- "email sara@company.com saying exactly 'Yo sup this is via Sara', subject is 'MCP Zindabad'" → purpose: "Yo sup this is via Sara", custom_subject: "MCP Zindabad", is_verbatim: true
-- "send email to client@business.com about the meeting" → purpose: "the meeting", is_verbatim: false
+- "send email to user@domain.com saying 'Hello there'" → purpose: "Hello there", is_verbatim: true
+- "email person@company.org saying exactly 'Yo sup this is via Sara', subject is 'MCP Zindabad'" → purpose: "Yo sup this is via Sara", custom_subject: "MCP Zindabad", is_verbatim: true
+- "send email to contact@organization.net about the meeting" → purpose: "the meeting", is_verbatim: false
 
 If you can't find recipient emails, set to empty array.
 If you can't determine the purpose, set it to empty string.
