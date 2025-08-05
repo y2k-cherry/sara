@@ -67,21 +67,39 @@ def get_openai_client():
                 
                 # Extract fee - handle multiple separators including semicolon
                 fee_patterns = [
-                    r'Flat\s+Fee[;\s:]*Rs\.?\s*([0-9,]+)',
-                    r'(?:Flat\s+)?Fee[;\s:]*Rs\.?\s*([0-9,]+)',
-                    r'Fee[;\s:]*Rs\.?\s*([0-9,]+)',
-                    r'Rs\.?\s*([0-9,]+).*(?:fee|Fee)'
+                    r'Flat\s+Fee[;\s:,]*Rs\.?\s*([0-9,]+)',  # Added comma separator
+                    r'(?:Flat\s+)?Fee[;\s:,]*Rs\.?\s*([0-9,]+)',  # Added comma separator
+                    r'Fee[;\s:,]*Rs\.?\s*([0-9,]+)',  # Added comma separator
+                    r'Rs\.?\s*([0-9,]+).*(?:fee|Fee)',
+                    r'Rs\.?\s*([0-9,]+)(?:\s*[,.]|\s*$)',  # More flexible end pattern
+                    r'(?:fee|Fee)[;\s:,]*Rs\.?\s*([0-9,]+)',  # Fee before Rs
+                    r'([0-9,]+)\s*(?:rs|Rs|RS)\.?\s*(?:fee|Fee)',  # Number before Rs fee
                 ]
                 flat_fee = ""
-                for pattern in fee_patterns:
+                for i, pattern in enumerate(fee_patterns):
                     fee_match = re.search(pattern, user_message, re.IGNORECASE)
                     if fee_match:
                         flat_fee = fee_match.group(1).replace(',', '')
-                        print(f"🔍 DEBUG: Mock client found fee with pattern '{pattern}': {flat_fee}")
+                        print(f"🔍 DEBUG: Mock client found fee with pattern {i+1} '{pattern}': {flat_fee}")
                         break
                 
                 if not flat_fee:
                     print(f"🔍 DEBUG: Mock client could not find fee in message: {user_message}")
+                    # Try even more aggressive patterns as last resort
+                    aggressive_patterns = [
+                        r'(\d+)\s*(?:rs|Rs|RS)',  # Any number followed by rs
+                        r'Rs\.?\s*(\d+)',  # Rs followed by number
+                        r'(\d+).*(?:fee|Fee)',  # Any number with fee somewhere after
+                    ]
+                    for i, pattern in enumerate(aggressive_patterns):
+                        fee_match = re.search(pattern, user_message, re.IGNORECASE)
+                        if fee_match:
+                            potential_fee = fee_match.group(1)
+                            # Only accept if it's a reasonable fee amount (not deposit-like)
+                            if int(potential_fee) < 10000:  # Assume fees are less than 10k
+                                flat_fee = potential_fee
+                                print(f"🔍 DEBUG: Mock client found fee with aggressive pattern {i+1}: {flat_fee}")
+                                break
                 
                 # Extract industry/field
                 field_match = re.search(r'Field:\s*([^,\n]+)', user_message, re.IGNORECASE)
@@ -227,17 +245,22 @@ def extract_agreement_fields(message_text: str):
         "ALWAYS return valid JSON, never explanatory text."
     )
 
+    # First try OpenAI, but with better error handling for production
     try:
         print("🔍 DEBUG: Attempting to get OpenAI client...")
         client = get_openai_client()
         print(f"🔍 DEBUG: OpenAI client type: {type(client)}")
         
-        # Check if this is the mock client
-        if hasattr(client, 'chat') and hasattr(client.chat, 'completions'):
-            if hasattr(client.chat.completions, 'create'):
-                print("🔍 DEBUG: Using OpenAI client (real or mock)")
-            else:
-                print("🔍 DEBUG: Client structure unexpected")
+        # Check if this is the mock client by looking at the class name
+        is_mock_client = "Mock" in str(type(client))
+        print(f"🔍 DEBUG: Using {'mock' if is_mock_client else 'real'} OpenAI client")
+        
+        # If it's the mock client, we know it will work, so proceed
+        # If it's the real client, add timeout and error handling
+        if not is_mock_client:
+            print("🔍 DEBUG: Making real OpenAI API call...")
+            import time
+            start_time = time.time()
         
         chat = client.chat.completions.create(
             model="gpt-4o",
@@ -245,34 +268,23 @@ def extract_agreement_fields(message_text: str):
                 {"role": "system", "content": sys_prompt},
                 {"role": "user",   "content": message_text}
             ],
-            temperature=0.1  # Lower temperature for more consistent JSON output
+            temperature=0.1,  # Lower temperature for more consistent JSON output
+            timeout=30  # Add timeout for production
         )
+        
+        if not is_mock_client:
+            elapsed = time.time() - start_time
+            print(f"🔍 DEBUG: OpenAI API call completed in {elapsed:.2f} seconds")
+        
         content = chat.choices[0].message.content.strip()
         print(f"🔍 DEBUG: OpenAI response: {content}")
 
         # If GPT prepended text, extract just the JSON object
         # This regex grabs the first {...} block in the response
-        import re
         m = re.search(r"(\{.*\})", content, re.DOTALL)
         if not m:
-            print("🔍 DEBUG: No JSON found in OpenAI response, using fallback")
-            # Fallback: try to create a basic JSON with just the brand name
-            brand_match = re.search(r'(?:for|with|brand)\s+([A-Za-z0-9\s]+)', message_text, re.IGNORECASE)
-            if brand_match:
-                brand_name = brand_match.group(1).strip()
-                fallback_data = {
-                    "brand_name": brand_name,
-                    "company_name": "",
-                    "company_address": "",
-                    "industry": "",
-                    "flat_fee": "",
-                    "deposit": "",
-                    "deposit_in_words": ""
-                }
-                print(f"🔍 DEBUG: Fallback data: {fallback_data}")
-                return fallback_data, [f for f in REQUIRED_FIELDS if f != "brand_name"]
-            else:
-                raise ValueError(f"GPT did not return JSON. Full response:\n{content!r}")
+            print("🔍 DEBUG: No JSON found in OpenAI response, using manual extraction")
+            raise ValueError("No JSON found in OpenAI response")
         
         json_str = m.group(1)
         print(f"🔍 DEBUG: Extracted JSON string: {json_str}")
@@ -285,27 +297,97 @@ def extract_agreement_fields(message_text: str):
             raise ValueError(f"Invalid JSON from GPT:\n{json_str}\nError: {e}")
     
     except Exception as e:
-        print(f"🔍 DEBUG: OpenAI call failed: {e}")
-        print("🔍 DEBUG: Using manual extraction fallback")
+        print(f"🔍 DEBUG: OpenAI approach failed: {e}")
+        print("🔍 DEBUG: Falling back to manual regex extraction")
         
-        # If OpenAI call fails completely, try to extract brand name manually
-        brand_match = re.search(r'(?:for|with|brand)\s+([A-Za-z0-9\s]+)', message_text, re.IGNORECASE)
-        if brand_match:
-            brand_name = brand_match.group(1).strip()
-            fallback_data = {
-                "brand_name": brand_name,
-                "company_name": "",
-                "company_address": "",
-                "industry": "",
-                "flat_fee": "",
-                "deposit": "",
-                "deposit_in_words": ""
-            }
-            print(f"🔍 DEBUG: Manual extraction fallback data: {fallback_data}")
-            return fallback_data, [f for f in REQUIRED_FIELDS if f != "brand_name"]
-        else:
-            print("🔍 DEBUG: Could not extract brand name manually")
-            raise e
+        # Manual extraction as fallback - this should always work
+        data = {}
+        
+        # Extract brand name
+        brand_patterns = [
+            r'(?:for|with|brand)\s+([A-Za-z0-9\s&]+?)(?:,|$|\s+Legal)',
+            r'agreement for\s+([A-Za-z0-9\s&]+?)(?:,|$)',
+            r'generate.*?for\s+([A-Za-z0-9\s&]+?)(?:,|$)',
+        ]
+        for pattern in brand_patterns:
+            brand_match = re.search(pattern, message_text, re.IGNORECASE)
+            if brand_match:
+                data["brand_name"] = brand_match.group(1).strip()
+                break
+        
+        # Extract legal name/company name
+        legal_match = re.search(r'Legal name:\s*([^,]+)', message_text, re.IGNORECASE)
+        data["company_name"] = legal_match.group(1).strip() if legal_match else ""
+        
+        # Extract address - look for pattern after "Address:"
+        address_patterns = [
+            r'Address:\s*([^.]+\.)',  # Until period
+            r'Address:\s*([^,]+(?:,[^,]+)*)\s*(?:Deposit|Field|$)',  # Until next field
+        ]
+        for pattern in address_patterns:
+            address_match = re.search(pattern, message_text, re.IGNORECASE)
+            if address_match:
+                data["company_address"] = address_match.group(1).strip()
+                break
+        
+        # Extract deposit
+        deposit_match = re.search(r'Deposit:\s*Rs\.?\s*([0-9,]+)', message_text, re.IGNORECASE)
+        data["deposit"] = deposit_match.group(1).replace(',', '') if deposit_match else ""
+        
+        # Extract fee with enhanced patterns
+        fee_patterns = [
+            r'Flat\s+Fee[;\s:,]*Rs\.?\s*([0-9,]+)',
+            r'(?:Flat\s+)?Fee[;\s:,]*Rs\.?\s*([0-9,]+)',
+            r'Fee[;\s:,]*Rs\.?\s*([0-9,]+)',
+            r'Rs\.?\s*([0-9,]+).*(?:fee|Fee)',
+            r'Rs\.?\s*([0-9,]+)(?:\s*[,.]|\s*$)',
+            r'(?:fee|Fee)[;\s:,]*Rs\.?\s*([0-9,]+)',
+            r'([0-9,]+)\s*(?:rs|Rs|RS)\.?\s*(?:fee|Fee)',
+        ]
+        data["flat_fee"] = ""
+        for i, pattern in enumerate(fee_patterns):
+            fee_match = re.search(pattern, message_text, re.IGNORECASE)
+            if fee_match:
+                data["flat_fee"] = fee_match.group(1).replace(',', '')
+                print(f"🔍 DEBUG: Manual extraction found fee with pattern {i+1}: {data['flat_fee']}")
+                break
+        
+        # If still no fee found, try aggressive patterns
+        if not data["flat_fee"]:
+            aggressive_patterns = [
+                r'(\d+)\s*(?:rs|Rs|RS)',
+                r'Rs\.?\s*(\d+)',
+                r'(\d+).*(?:fee|Fee)',
+            ]
+            for i, pattern in enumerate(aggressive_patterns):
+                fee_match = re.search(pattern, message_text, re.IGNORECASE)
+                if fee_match:
+                    potential_fee = fee_match.group(1)
+                    # Only accept if it's a reasonable fee amount (not deposit-like)
+                    if int(potential_fee) < 10000:
+                        data["flat_fee"] = potential_fee
+                        print(f"🔍 DEBUG: Manual extraction found fee with aggressive pattern {i+1}: {data['flat_fee']}")
+                        break
+        
+        # Extract industry/field
+        field_match = re.search(r'Field:\s*([^,\n]+)', message_text, re.IGNORECASE)
+        data["industry"] = field_match.group(1).strip() if field_match else ""
+        
+        # Convert deposit to words
+        data["deposit_in_words"] = ""
+        if data.get("deposit"):
+            try:
+                deposit_num = int(data["deposit"])
+                data["deposit_in_words"] = convert_number_to_words(str(deposit_num))
+            except:
+                pass
+        
+        print(f"🔍 DEBUG: Manual extraction completed: {data}")
+
+    # Ensure all required fields exist
+    for field in REQUIRED_FIELDS:
+        if field not in data:
+            data[field] = ""
 
     data["start_date"] = str(date.today())
     
