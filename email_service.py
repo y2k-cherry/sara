@@ -30,166 +30,44 @@ class EmailService:
         if not self.email_password:
             print("⚠️  EMAIL_PASSWORD not found in environment variables")
     
-    def _get_openai_client(self):
-        """Get OpenAI client with lazy initialization"""
-        if self.openai_client is None:
-            try:
-                self.openai_client = openai.OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
-            except Exception as e:
-                print(f"⚠️  OpenAI client initialization failed in email_service: {e}")
-                # Create a mock client that tries to parse the message manually
-                print("⚠️  Using mock OpenAI client for email service")
-                def mock_create(*args, **kwargs):
-                    # Try to extract basic info from the message
-                    messages = kwargs.get('messages', [])
-                    user_message = ""
-                    for msg in messages:
-                        if isinstance(msg, dict) and msg.get('role') == 'user':
-                            user_message = msg.get('content', '')
-                            break
-                    
-                    # Manual extraction for email details
-                    import re
-                    
-                    # Extract email addresses - but only from the actual user message, not examples
-                    # Look for patterns like "send email to X" or "email X"
-                    email_pattern = r'(?:send\s+email\s+to\s+|email\s+)([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,})'
-                    email_matches = re.findall(email_pattern, user_message, re.IGNORECASE)
-                    
-                    # If no matches with context, try direct email extraction but filter out common test domains
-                    if not email_matches:
-                        all_emails = re.findall(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b', user_message)
-                        # Filter out test emails and only keep real emails
-                        test_domains = ['test.com', 'company.com', 'business.com', 'example.com']
-                        real_emails = [email for email in all_emails if not any(domain in email for domain in test_domains)]
-                        
-                        # If we have real emails, use only the first one
-                        if real_emails:
-                            email_matches = real_emails[:1]
-                        else:
-                            # If no real emails found, don't include any test emails
-                            email_matches = []
-                    
-                    emails = email_matches
-                    
-                    # Extract purpose - look for "saying", "about", quoted content
-                    purpose = ""
-                    is_verbatim = False
-                    custom_subject = ""
-                    
-                    # Check for quoted content (verbatim)
-                    quote_match = re.search(r"saying\s+['\"]([^'\"]+)['\"]", user_message, re.IGNORECASE)
-                    if quote_match:
-                        purpose = quote_match.group(1)
-                        is_verbatim = True
-                    else:
-                        # Check for "about" pattern
-                        about_match = re.search(r"about\s+(.+?)(?:\s+and\s+subject|$)", user_message, re.IGNORECASE)
-                        if about_match:
-                            purpose = about_match.group(1).strip()
-                        else:
-                            # Check for "saying" without quotes
-                            saying_match = re.search(r"saying\s+(.+?)(?:\s+and\s+subject|$)", user_message, re.IGNORECASE)
-                            if saying_match:
-                                purpose = saying_match.group(1).strip()
-                    
-                    # Extract custom subject
-                    subject_match = re.search(r"subject\s+is\s+['\"]([^'\"]+)['\"]", user_message, re.IGNORECASE)
-                    if subject_match:
-                        custom_subject = subject_match.group(1)
-                    
-                    # If this is a composition request, return email content
-                    if "compose" in user_message.lower() or "subject line" in user_message.lower():
-                        # This is an email composition request
-                        subject = custom_subject if custom_subject else "Message from Yash Kewalramani"
-                        body = f"Hi,\n\n{purpose}\n\nBest regards,\nYash Kewalramani"
-                        return type('Response', (), {
-                            'choices': [type('Choice', (), {
-                                'message': type('Message', (), {
-                                    'content': json.dumps({"subject": subject, "body": body})
-                                })()
-                            })()]
-                        })()
-                    else:
-                        # This is an extraction request
-                        result = {
-                            "purpose": purpose,
-                            "recipient_emails": emails,
-                            "recipient_names": [],
-                            "custom_subject": custom_subject,
-                            "is_verbatim": is_verbatim,
-                            "additional_context": ""
-                        }
-                        return type('Response', (), {
-                            'choices': [type('Choice', (), {
-                                'message': type('Message', (), {
-                                    'content': json.dumps(result)
-                                })()
-                            })()]
-                        })()
-                
-                self.openai_client = type('MockClient', (), {
-                    'chat': type('Chat', (), {
-                        'completions': type('Completions', (), {
-                            'create': mock_create
-                        })()
-                    })()
-                })()
-        return self.openai_client
-    
     def extract_email_details(self, message_text: str) -> dict:
-        """Extract email purpose and recipient(s) from the message"""
+        """Extract email purpose and recipient(s) from the message using simple regex"""
         try:
-            prompt = f"""
-Extract email details from this Slack message. The user wants to send an email.
-
-Message: "{message_text}"
-
-IMPORTANT RULES:
-1. If text is in quotes (single or double), extract it EXACTLY as written - this is verbatim content
-2. Look for explicit subject specification like "subject is 'xyz'" or "subject: 'xyz'"
-3. Text in quotes should NOT be processed or modified - use exactly as provided
-
-Extract and return ONLY a JSON object with these keys:
-- purpose: The purpose/content of the email. If in quotes, use EXACTLY as written. Look for "saying", "about", "regarding", "to tell them", or quoted content.
-- recipient_emails: Array of email addresses (even if just one recipient, return as array)
-- recipient_names: Array of recipient names (if mentioned, otherwise use emails)
-- custom_subject: If user specifies subject explicitly (like "subject is 'xyz'"), extract the EXACT quoted text. Otherwise empty string.
-- is_verbatim: true if the purpose content is in quotes (should be used exactly as written), false if it should be processed by AI
-- additional_context: Any additional context or details mentioned
-
-Examples:
-- "send email to user@domain.com saying 'Hello there'" → purpose: "Hello there", is_verbatim: true
-- "email person@company.org saying exactly 'Yo sup this is via Sara', subject is 'MCP Zindabad'" → purpose: "Yo sup this is via Sara", custom_subject: "MCP Zindabad", is_verbatim: true
-- "send email to contact@organization.net about the meeting" → purpose: "the meeting", is_verbatim: false
-
-If you can't find recipient emails, set to empty array.
-If you can't determine the purpose, set it to empty string.
-
-Return ONLY the JSON, no other text.
-"""
+            # Simple direct extraction - no AI needed
             
-            client = self._get_openai_client()
-            response = client.chat.completions.create(
-                model="gpt-4",
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.1
-            )
+            # Extract the recipient email - look for "to" followed by email
+            recipient_match = re.search(r'to\s+([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,})', message_text, re.IGNORECASE)
+            recipient_email = recipient_match.group(1) if recipient_match else ""
             
-            content = response.choices[0].message.content.strip()
+            # Extract purpose - look for "saying" with quotes or without
+            purpose = ""
+            is_verbatim = False
             
-            # Extract JSON from response
-            json_match = re.search(r'\{.*\}', content, re.DOTALL)
-            if json_match:
-                result = json.loads(json_match.group(0))
-                # Ensure backward compatibility - convert single values to arrays if needed
-                if "recipient_emails" not in result and "recipient_email" in result:
-                    result["recipient_emails"] = [result["recipient_email"]] if result["recipient_email"] else []
-                if "recipient_names" not in result and "recipient_name" in result:
-                    result["recipient_names"] = [result["recipient_name"]] if result["recipient_name"] else []
-                return result
+            # Check for quoted content (verbatim)
+            quote_match = re.search(r"saying\s+['\"]([^'\"]+)['\"]", message_text, re.IGNORECASE)
+            if quote_match:
+                purpose = quote_match.group(1)
+                is_verbatim = True
             else:
-                return {"purpose": "", "recipient_emails": [], "recipient_names": [], "additional_context": ""}
+                # Check for "saying" without quotes
+                saying_match = re.search(r"saying\s+(.+?)(?:\s*$)", message_text, re.IGNORECASE)
+                if saying_match:
+                    purpose = saying_match.group(1).strip()
+            
+            # Extract custom subject
+            subject_match = re.search(r"subject\s+is\s+['\"]([^'\"]+)['\"]", message_text, re.IGNORECASE)
+            custom_subject = subject_match.group(1) if subject_match else ""
+            
+            result = {
+                "purpose": purpose,
+                "recipient_emails": [recipient_email] if recipient_email else [],
+                "recipient_names": [],
+                "custom_subject": custom_subject,
+                "is_verbatim": is_verbatim,
+                "additional_context": ""
+            }
+            
+            return result
                 
         except Exception as e:
             print(f"Error extracting email details: {e}")
@@ -198,61 +76,21 @@ Return ONLY the JSON, no other text.
     def compose_email(self, purpose: str, recipient_name: str, additional_context: str = "", is_verbatim: bool = False, custom_subject: str = "") -> dict:
         """Compose a professional email based on the purpose"""
         try:
+            # Simple email composition without AI
+            subject = custom_subject if custom_subject else "Message from Yash Kewalramani"
+            
             if is_verbatim:
-                # Use verbatim content - don't process through AI
-                subject = custom_subject if custom_subject else "Message from Yash Kewalramani"
+                # Use verbatim content
                 body = f"Hi {recipient_name},\n\n{purpose}\n\nBest regards,\nYash Kewalramani"
-                return {"subject": subject, "body": body}
-            
-            # Regular AI-composed email
-            subject_instruction = f"Use this exact subject: '{custom_subject}'" if custom_subject else "Generate an appropriate subject line"
-            
-            prompt = f"""
-You are Sara, an AI assistant helping Yash Kewalramani (yash@cherryapp.in) compose a professional email.
-
-Email Details:
-- Purpose: {purpose}
-- Recipient: {recipient_name}
-- Additional Context: {additional_context}
-- Sender: Yash Kewalramani
-- Subject Instruction: {subject_instruction}
-
-Compose a concise, professional email with:
-1. Subject line: {subject_instruction}
-2. A well-structured body that is brief but complete
-3. Professional tone suitable for business communication
-
-Return ONLY a JSON object with:
-- subject: The email subject line
-- body: The email body (use \\n for line breaks)
-
-Keep it concise - aim for 3-4 sentences maximum unless more detail is specifically needed.
-"""
-            
-            client = self._get_openai_client()
-            response = client.chat.completions.create(
-                model="gpt-4",
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.3
-            )
-            
-            content = response.choices[0].message.content.strip()
-            
-            # Extract JSON from response
-            json_match = re.search(r'\{.*\}', content, re.DOTALL)
-            if json_match:
-                result = json.loads(json_match.group(0))
-                # Override subject if custom subject is provided
-                if custom_subject:
-                    result["subject"] = custom_subject
-                return result
             else:
-                subject = custom_subject if custom_subject else purpose
-                return {"subject": subject, "body": f"Hi {recipient_name},\n\nI hope this email finds you well.\n\nBest regards,\nYash Kewalramani"}
+                # Simple professional template
+                body = f"Hi {recipient_name},\n\n{purpose}\n\nBest regards,\nYash Kewalramani"
+            
+            return {"subject": subject, "body": body}
                 
         except Exception as e:
             print(f"Error composing email: {e}")
-            subject = custom_subject if custom_subject else purpose
+            subject = custom_subject if custom_subject else "Message from Yash Kewalramani"
             return {"subject": subject, "body": f"Hi {recipient_name},\n\nI hope this email finds you well.\n\nBest regards,\nYash Kewalramani"}
     
     def send_email(self, recipient_emails, subject: str, body: str) -> bool:
