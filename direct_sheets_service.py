@@ -54,11 +54,29 @@ class DirectSheetsService:
         return self.openai_client
     
     def _load_oauth_credentials(self):
-        """Load OAuth credentials from token.json"""
+        """Load OAuth credentials from token.json or environment variables"""
         try:
             from google.auth.transport.requests import Request
             from google.oauth2.credentials import Credentials
             
+            # First try to load from environment variables (for Render deployment)
+            google_token_json = os.getenv('GOOGLE_TOKEN_JSON')
+            if google_token_json:
+                try:
+                    import json
+                    token_data = json.loads(google_token_json)
+                    self.oauth_credentials = Credentials.from_authorized_user_info(token_data)
+                    
+                    # Refresh if expired
+                    if self.oauth_credentials.expired and self.oauth_credentials.refresh_token:
+                        self.oauth_credentials.refresh(Request())
+                        
+                    print("✅ OAuth credentials loaded from environment variable")
+                    return
+                except Exception as e:
+                    print(f"⚠️  Failed to load OAuth credentials from environment: {e}")
+            
+            # Fallback to token.json file (for local development)
             token_path = 'token.json'
             if os.path.exists(token_path):
                 self.oauth_credentials = Credentials.from_authorized_user_file(token_path)
@@ -67,9 +85,9 @@ class DirectSheetsService:
                 if self.oauth_credentials.expired and self.oauth_credentials.refresh_token:
                     self.oauth_credentials.refresh(Request())
                     
-                print("✅ OAuth credentials loaded successfully")
+                print("✅ OAuth credentials loaded from token.json file")
             else:
-                print("⚠️  No OAuth credentials found (token.json missing)")
+                print("⚠️  No OAuth credentials found (neither GOOGLE_TOKEN_JSON env var nor token.json file)")
                 
         except Exception as e:
             print(f"⚠️  Failed to load OAuth credentials: {e}")
