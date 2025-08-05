@@ -42,32 +42,48 @@ def get_intent_from_text(text: str) -> str:
     # First try basic pattern matching for common intents (fallback when OpenAI fails)
     text_lower = text.lower().strip()
     
-    # Check for brand information queries
-    brand_info_patterns = [
-        'fetch', 'info', 'gst number', 'gst details', 'brand id', 'show me info for',
-        'what\'s', 'what is', 'do we have', 'brand information', 'company info'
-    ]
-    brand_keywords = ['freakins', 'yama yoga', 'fae', 'inde wild', 'theater']
-    
-    # Check if it's a brand info query
-    has_brand_pattern = any(pattern in text_lower for pattern in brand_info_patterns)
-    has_brand_keyword = any(keyword in text_lower for keyword in brand_keywords)
-    
-    # Specific patterns for brand queries
-    specific_brand_patterns = [
-        r'fetch\s+\w+\s+info',
-        r'show\s+me\s+info\s+for\s+\w+',
-        r'what\'?s\s+\w+\'?s?\s+gst',
-        r'do\s+we\s+have\s+\w+\'?s?\s+gst',
-        r'what\s+is\s+\w+\'?s?\s+brand\s+id',
-        r'\w+\s+info',
-        r'info\s+for\s+\w+'
-    ]
-    
+    # Check for brand information queries - PRIORITY CHECK
     import re
-    has_specific_pattern = any(re.search(pattern, text_lower) for pattern in specific_brand_patterns)
     
-    if has_brand_pattern or has_brand_keyword or has_specific_pattern:
+    # Specific patterns for brand queries (more precise matching)
+    brand_specific_patterns = [
+        r'fetch\s+\w+.*info',
+        r'fetch\s+\w+.*details',
+        r'show\s+me\s+info\s+for\s+\w+',
+        r'what\'?s\s+\w+.*gst',
+        r'do\s+we\s+have\s+\w+.*gst',
+        r'what\s+is\s+\w+.*brand\s+id',
+        r'\w+.*info$',
+        r'info\s+for\s+\w+',
+        r'get\s+\w+.*info',
+        r'\w+.*details$'
+    ]
+    
+    # Check specific brand patterns first
+    for pattern in brand_specific_patterns:
+        if re.search(pattern, text_lower):
+            return 'brand_info'
+    
+    # Check for brand-related keywords combined with info requests
+    brand_info_indicators = [
+        ('fetch', 'info'), ('fetch', 'details'), ('show', 'info'), 
+        ('what\'s', 'gst'), ('what is', 'gst'), ('gst', 'number'), 
+        ('gst', 'details'), ('brand', 'id'), ('company', 'info'),
+        ('brand', 'info'), ('brand', 'details')
+    ]
+    
+    for word1, word2 in brand_info_indicators:
+        if word1 in text_lower and word2 in text_lower:
+            return 'brand_info'
+    
+    # Check for known brand names with info requests
+    brand_keywords = ['freakins', 'yama yoga', 'fae', 'inde wild', 'theater']
+    info_keywords = ['info', 'details', 'gst', 'brand id', 'information']
+    
+    has_brand = any(brand in text_lower for brand in brand_keywords)
+    has_info_request = any(info_word in text_lower for info_word in info_keywords)
+    
+    if has_brand and has_info_request:
         return 'brand_info'
     
     # Check for agreement generation
@@ -108,8 +124,19 @@ Respond with only one of the following:
 - get_status (for checking status information)
 - lookup_sheets (for looking up data in Google Sheets, spreadsheets, payment info, or any data queries)
 - send_email (for sending emails to people)
+- brand_info (for fetching brand information, GST numbers, brand IDs, company details)
 - help (for questions about what Sara can do or help requests)
 - unknown
+
+Examples of brand_info intent:
+- "fetch Freakins info"
+- "Show me info for Yama Yoga"
+- "What's FAE's GST number"
+- "Do we have inde wild's GST details"
+- "What is Theater's brand ID"
+- "Get brand information for XYZ Company"
+- "Fetch company details for ABC Corp"
+- Any request for brand/company information, GST numbers, brand IDs, or company details
 
 Examples of send_email intent:
 - "Send an email to john@example.com about the meeting"
