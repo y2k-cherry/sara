@@ -31,13 +31,27 @@ class EmailService:
             print("⚠️  EMAIL_PASSWORD not found in environment variables")
     
     def extract_email_details(self, message_text: str) -> dict:
-        """Extract email purpose and recipient(s) from the message using simple regex"""
+        """Extract email purpose and recipient(s) from the message using robust regex patterns"""
         try:
-            # Simple direct extraction - no AI needed
+            # Multiple patterns to extract recipient email - more robust approach
+            recipient_email = ""
             
-            # Extract the recipient email - look for "to" followed by email OR "email" followed by email
-            recipient_match = re.search(r'(?:to|email)\s+([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,})', message_text, re.IGNORECASE)
-            recipient_email = recipient_match.group(1) if recipient_match else ""
+            # Pattern 1: "to [email]" (with possible words in between)
+            pattern1 = re.search(r'to\s+(?:\w+\s+)*([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,})', message_text, re.IGNORECASE)
+            if pattern1:
+                recipient_email = pattern1.group(1)
+            
+            # Pattern 2: "email [email]" (with possible words in between)
+            if not recipient_email:
+                pattern2 = re.search(r'email\s+(?:\w+\s+)*([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,})', message_text, re.IGNORECASE)
+                if pattern2:
+                    recipient_email = pattern2.group(1)
+            
+            # Pattern 3: Just find any email address in the message
+            if not recipient_email:
+                pattern3 = re.search(r'([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,})', message_text, re.IGNORECASE)
+                if pattern3:
+                    recipient_email = pattern3.group(1)
             
             # Extract purpose - look for multiple patterns
             purpose = ""
