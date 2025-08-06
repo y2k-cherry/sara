@@ -57,8 +57,26 @@ All test cases now pass successfully:
 ## Deployment Status
 Ready for deployment to Render. The improved email extraction logic will now correctly identify email addresses in various message formats, resolving the issue where Sara couldn't find clearly specified email addresses.
 
+## Additional Fix: Slack Display Name Formatting
+After initial deployment, discovered that Slack formats email links with display names using pipe character (e.g., "yash@cherryapp.in|yash"). Added email cleaning logic to remove pipe character and everything after it.
+
+### Pipe Character Cleaning
+```python
+# Clean up email address - remove Slack display name formatting (email|displayname)
+if recipient_email and '|' in recipient_email:
+    recipient_email = recipient_email.split('|')[0].strip()
+```
+
+### Additional Test Results
+✅ **Slack Format Tests**:
+- Plain format: "yash@cherryapp.in" → "yash@cherryapp.in" ✅
+- Pipe format: "yash@cherryapp.in|yash" → "yash@cherryapp.in" ✅
+- Mailto format: "<mailto:yash@cherryapp.in|yash>" → "yash@cherryapp.in" ✅
+- Angle bracket format: "<yash@cherryapp.in|yash>" → "yash@cherryapp.in" ✅
+
 ## Impact
 - ✅ Fixes email extraction failures
 - ✅ Supports multiple message formats
+- ✅ Handles Slack email link formatting with display names
 - ✅ Maintains backward compatibility
 - ✅ Improves user experience with email functionality

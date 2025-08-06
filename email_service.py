@@ -53,6 +53,10 @@ class EmailService:
                 if pattern3:
                     recipient_email = pattern3.group(1)
             
+            # Clean up email address - remove Slack display name formatting (email|displayname)
+            if recipient_email and '|' in recipient_email:
+                recipient_email = recipient_email.split('|')[0].strip()
+            
             # Extract purpose - look for multiple patterns
             purpose = ""
             is_verbatim = False
