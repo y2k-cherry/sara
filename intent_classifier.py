@@ -41,7 +41,16 @@ def get_intent_from_text(text: str) -> str:
     """
     text_lower = text.lower().strip()
     
-    # PRIORITY 1: Payment/Sheets queries (most critical - must work reliably)
+    # PRIORITY 1: Email sending (check first to handle mixed intents correctly)
+    email_patterns = [
+        'send email', 'email to', 'send an email', 'draft email', 'compose email', 
+        'email about', 'email the', 'send the email', 'email them', 'email him', 
+        'email her', 'email it', 'forward email', 'reply email'
+    ]
+    if any(pattern in text_lower for pattern in email_patterns):
+        return 'send_email'
+    
+    # PRIORITY 2: Payment/Sheets queries (most critical - must work reliably)
     payment_patterns = [
         "who hasn't paid", "who hasnt paid", "who has not paid", "havent paid", "haven't paid",
         "unpaid brands", "negative balance", "outstanding balance", "who owes", "payment due",
@@ -64,7 +73,7 @@ def get_intent_from_text(text: str) -> str:
     if any(pattern in text_lower for pattern in sheets_patterns):
         return 'lookup_sheets'
     
-    # PRIORITY 2: Brand information queries
+    # PRIORITY 3: Brand information queries
     import re
     
     # Specific brand patterns (regex for precise matching)
@@ -107,17 +116,12 @@ def get_intent_from_text(text: str) -> str:
     if has_brand and has_info_request:
         return 'brand_info'
     
-    # PRIORITY 3: Other specific intents
+    # PRIORITY 4: Other specific intents
     
     # Agreement generation
     agreement_patterns = ['generate agreement', 'create agreement', 'agreement for', 'partnership agreement']
     if any(pattern in text_lower for pattern in agreement_patterns):
         return 'generate_agreement'
-    
-    # Email sending
-    email_patterns = ['send email', 'email to', 'send an email', 'draft email', 'compose email', 'email about']
-    if any(pattern in text_lower for pattern in email_patterns):
-        return 'send_email'
     
     # Status queries
     status_patterns = ['status', 'current status', 'what\'s the status', 'project status']
@@ -128,7 +132,8 @@ def get_intent_from_text(text: str) -> str:
     help_patterns = [
         'help', 'what can you do', 'what all can you do', 'capabilities', 
         'functions', 'services', 'how can you help', 'what are your capabilities',
-        'what functions do you have', 'what services do you provide'
+        'what functions do you have', 'what services do you provide', 'hello',
+        'hi', 'hey', 'greetings', 'good morning', 'good afternoon', 'good evening'
     ]
     if any(pattern in text_lower for pattern in help_patterns):
         return 'help'

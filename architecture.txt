@@ -1,0 +1,296 @@
+# Sara AI Assistant - Technical Architecture
+
+## Overview
+Sara is a sophisticated Slack bot that provides AI-powered assistance for partnership agreements, email management, Google Sheets analysis, and brand information lookup. The system is built with a modular, service-oriented architecture that handles multiple types of user requests through intelligent intent classification.
+
+## High-Level Architecture
+
+```
+┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
+│   Slack User    │───▶│   Orchestrator   │───▶│ Intent Classifier│
+└─────────────────┘    └──────────────────┘    └─────────────────┘
+                                │                        │
+                                ▼                        ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                     Service Router                              │
+├─────────────────┬─────────────────┬─────────────────┬───────────┤
+│ Agreement       │ Email Service   │ Sheets Service  │ Brand     │
+│ Service         │                 │                 │ Service   │
+└─────────────────┴─────────────────┴─────────────────┴───────────┘
+        │                   │                   │           │
+        ▼                   ▼                   ▼           ▼
+┌─────────────────────────────────────────────────────────────────┐
+│              External Integrations                              │
+├─────────────────┬─────────────────┬─────────────────┬───────────┤
+│ OpenAI API      │ SMTP Server     │ Google Sheets   │ Google    │
+│ (GPT-4)         │ (Gmail)         │ API             │ Docs API  │
+└─────────────────┴─────────────────┴─────────────────┴───────────┘
+```
+
+## Core Components
+
+### 1. Entry Points (Orchestrators)
+
+#### orchestrator.py (Socket Mode)
+- **Purpose**: Handles Slack events via WebSocket connection
+- **Use Case**: Development and local testing
+- **Key Features**:
+  - Real-time bidirectional communication
+  - Automatic reconnection handling
+  - Thread-based message handling
+
+#### orchestrator_http.py (HTTP Mode)
+- **Purpose**: Handles Slack events via HTTP endpoints
+- **Use Case**: Production deployment (Render, Railway, etc.)
+- **Key Features**:
+  - Flask-based web server
+  - URL verification handling
+  - Health check endpoints
+  - Graceful error handling
+
+### 2. Intent Classification System
+
+#### intent_classifier.py
+- **Purpose**: Determines user intent from natural language
+- **Technology**: OpenAI GPT-4 with regex fallbacks
+- **Supported Intents**:
+  - `generate_agreement`: Partnership agreement creation
+  - `send_email`: Email composition and sending
+  - `lookup_sheets`: Google Sheets data analysis
+  - `brand_info`: Brand information retrieval
+  - `get_status`: Status updates
+  - `help`: Usage instructions
+
+**Classification Flow**:
+```
+User Message → Text Cleaning → Pattern Matching → OpenAI Analysis → Intent
+```
+
+### 3. Service Layer
+
+#### Agreement Service (agreement_service.py)
+- **Purpose**: Generates partnership agreements from user input
+- **Process Flow**:
+  1. Extract agreement fields using OpenAI
+  2. Validate required information
+  3. Fill DOCX template with extracted data
+  4. Convert to PDF using Google Docs API
+  5. Upload to Slack thread
+
+**Key Features**:
+- AI-powered field extraction
+- Currency formatting (Indian Rupees)
+- Number-to-words conversion
+- Template-based document generation
+- Fallback to manual regex extraction
+
+#### Email Service (email_service.py)
+- **Purpose**: Handles email composition, preview, and sending
+- **Process Flow**:
+  1. Extract recipient emails and purpose from message
+  2. Clean Slack formatting (pipe characters)
+  3. Compose professional email content
+  4. Show preview in Slack
+  5. Wait for user confirmation
+  6. Send via SMTP
+
+**Key Features**:
+- Robust email extraction with multiple regex patterns
+- Slack link formatting cleanup
+- Multi-recipient support
+- Email preview with confirmation workflow
+- SMTP integration with Gmail
+
+#### Direct Sheets Service (direct_sheets_service.py)
+- **Purpose**: Analyzes Google Sheets data and answers queries
+- **Authentication Methods**:
+  - OAuth 2.0 for private sheets
+  - API Key for public sheets
+- **Process Flow**:
+  1. Detect query type (payment, brand count, general)
+  2. Extract sheet ID from URL
+  3. Fetch data using appropriate authentication
+  4. Analyze data with OpenAI
+  5. Return formatted response
+
+**Special Features**:
+- Payment query detection (Brand Balances sheet)
+- Complete dataset analysis for counting queries
+- Fuzzy brand name matching
+- Indian currency formatting
+
+#### Brand Info Service (brand_info_service.py)
+- **Purpose**: Retrieves brand information from Brand Master sheet
+- **Features**:
+  - Fuzzy string matching for brand names
+  - GST number lookup
+  - Brand ID retrieval
+  - Company details extraction
+
+### 4. External Integrations
+
+#### OpenAI Integration
+- **Models Used**: GPT-4, GPT-4o
+- **Use Cases**:
+  - Intent classification
+  - Agreement field extraction
+  - Email composition
+  - Sheets data analysis
+- **Fallback Strategy**: Mock clients with regex-based extraction
+
+#### Google Services
+- **Sheets API**: Data reading and analysis
+- **Docs API**: PDF conversion from DOCX
+- **OAuth 2.0**: Private sheet access
+- **API Key**: Public sheet access
+
+#### SMTP Integration
+- **Provider**: Gmail SMTP
+- **Features**:
+  - TLS encryption
+  - Multi-recipient support
+  - CC to sender
+  - Error handling
+
+## Data Flow: From Slack Message to Response
+
+### 1. Message Reception
+```
+Slack Message → Orchestrator → Event Processing → Text Cleaning
+```
+
+### 2. Intent Classification
+```
+Cleaned Text → Pattern Matching → OpenAI Analysis → Intent Determination
+```
+
+### 3. Service Routing
+```
+Intent + Message → Service Selection → Service Processing → External API Calls
+```
+
+### 4. Response Generation
+```
+Service Output → Response Formatting → Slack API → User Response
+```
+
+## Detailed Flow Examples
+
+### Email Request Flow
+1. **Input**: "@Sara send an email to john@example.com saying Hello"
+2. **Processing**:
+   - Intent: `send_email`
+   - Email extraction: "john@example.com"
+   - Purpose extraction: "Hello"
+   - Slack formatting cleanup (pipe characters)
+3. **Service**: EmailService.extract_email_details()
+4. **Composition**: Professional email template
+5. **Preview**: Formatted preview in Slack
+6. **Confirmation**: User replies "✅ send"
+7. **Sending**: SMTP delivery via Gmail
+8. **Response**: Success confirmation
+
+### Agreement Generation Flow
+1. **Input**: "Generate agreement for XYZ Corp, Legal name: XYZ Corporation..."
+2. **Processing**:
+   - Intent: `generate_agreement`
+   - Field extraction via OpenAI
+   - Validation of required fields
+3. **Service**: AgreementService.extract_agreement_fields()
+4. **Template**: Fill DOCX template
+5. **Conversion**: DOCX to PDF via Google Docs API
+6. **Upload**: File upload to Slack thread
+7. **Response**: Agreement document delivered
+
+### Sheets Analysis Flow
+1. **Input**: "How many brands are listed in this sheet? [URL]"
+2. **Processing**:
+   - Intent: `lookup_sheets`
+   - Sheet ID extraction from URL
+   - Query type detection (brand counting)
+3. **Service**: DirectSheetsService.process_sheets_query()
+4. **Authentication**: OAuth or API key
+5. **Data Fetching**: Complete dataset retrieval
+6. **Analysis**: Brand counting with status filtering
+7. **Response**: Formatted count with examples
+
+## Error Handling & Resilience
+
+### Graceful Degradation
+- **OpenAI Failures**: Fallback to regex-based extraction
+- **Authentication Issues**: Multiple auth methods (OAuth + API Key)
+- **Service Failures**: Informative error messages to users
+
+### Production Considerations
+- **Environment Variables**: Secure credential management
+- **Timeout Handling**: API call timeouts
+- **Rate Limiting**: OpenAI and Google API limits
+- **Logging**: Comprehensive debug logging
+
+## Deployment Architecture
+
+### Development
+- **Mode**: Socket Mode (orchestrator.py)
+- **Connection**: WebSocket to Slack
+- **Benefits**: Real-time, easy debugging
+
+### Production
+- **Mode**: HTTP Mode (orchestrator_http.py)
+- **Server**: Flask application
+- **Deployment**: Render, Railway, or similar PaaS
+- **Endpoints**:
+  - `/slack/events` (POST): Slack event handling
+  - `/health` (GET): Health checks
+  - `/` (GET): Status endpoint
+
+### Environment Configuration
+```
+SLACK_BOT_TOKEN=xoxb-...
+SLACK_APP_TOKEN=xapp-... (Socket Mode only)
+SLACK_SIGNING_SECRET=... (HTTP Mode only)
+OPENAI_API_KEY=sk-...
+GOOGLE_API_KEY=...
+GOOGLE_TOKEN_JSON=... (OAuth credentials)
+EMAIL_PASSWORD=... (Gmail app password)
+SMTP_SERVER=smtp.gmail.com
+SMTP_PORT=587
+```
+
+## Security Features
+
+### Authentication
+- **Slack**: Bot tokens and signing secrets
+- **Google**: OAuth 2.0 with refresh tokens
+- **OpenAI**: API key authentication
+- **Email**: App-specific passwords
+
+### Data Protection
+- **Credentials**: Environment variable storage
+- **Tokens**: Automatic refresh handling
+- **Validation**: Input sanitization and validation
+
+## Performance Optimizations
+
+### Caching
+- **OAuth Tokens**: Automatic refresh and caching
+- **OpenAI Clients**: Lazy initialization
+- **Sheet Data**: Efficient data processing
+
+### Efficiency
+- **Regex Fallbacks**: Fast pattern matching
+- **Selective Analysis**: Complete vs. sample data analysis
+- **Timeout Management**: Prevents hanging requests
+
+## Monitoring & Debugging
+
+### Logging
+- **Debug Messages**: Comprehensive flow tracking
+- **Error Handling**: Detailed error reporting
+- **Performance**: API call timing
+
+### Health Checks
+- **Service Status**: Component initialization status
+- **API Connectivity**: External service health
+- **Error Rates**: Failure tracking
+
+This architecture provides a robust, scalable foundation for Sara's AI-powered assistance capabilities while maintaining reliability and user experience across different deployment environments.
