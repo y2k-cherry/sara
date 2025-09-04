@@ -49,61 +49,96 @@ def get_openai_client():
                 # Manual field extraction from the message
                 import re
                 
-                # Extract brand name
-                brand_match = re.search(r'(?:for|with|brand)\s+([A-Za-z0-9\s&]+?)(?:,|$|\s+Legal)', user_message, re.IGNORECASE)
-                brand_name = brand_match.group(1).strip() if brand_match else ""
+                # Extract brand name - FIXED for Bulbul message format
+                brand_patterns = [
+                    r'generate an agreement for\s+([A-Za-z0-9\s&]+?)(?:\s*\n|$)',  # "generate an agreement for Bulbul"
+                    r'agreement for\s+([A-Za-z0-9\s&]+?)(?:\s*\n|$)',  # "agreement for Bulbul"
+                    r'(?:for|with|brand)\s+([A-Za-z0-9\s&]+?)(?:\s*\n|\s*flat|\s*deposit|$)',  # Generic patterns
+                ]
+                brand_name = ""
+                for i, pattern in enumerate(brand_patterns):
+                    brand_match = re.search(pattern, user_message, re.IGNORECASE)
+                    if brand_match:
+                        brand_name = brand_match.group(1).strip()
+                        print(f"🔍 DEBUG: Mock client found brand with pattern {i+1}: '{brand_name}'")
+                        break
                 
-                # Extract legal name/company name
-                legal_match = re.search(r'Legal name:\s*([^,]+)', user_message, re.IGNORECASE)
-                company_name = legal_match.group(1).strip() if legal_match else ""
+                # Extract company name - FIXED for "company name is" format
+                company_patterns = [
+                    r'company name is\s+([^\n]+)',  # "company name is MED FASHIONS PRIVATE LIMITED"
+                    r'Legal name:\s*([^,\n]+)',  # "Legal name: XYZ"
+                    r'company name:\s*([^\n]+)',  # "company name: XYZ"
+                ]
+                company_name = ""
+                for pattern in company_patterns:
+                    company_match = re.search(pattern, user_message, re.IGNORECASE)
+                    if company_match:
+                        company_name = company_match.group(1).strip()
+                        print(f"🔍 DEBUG: Mock client found company: '{company_name}'")
+                        break
                 
-                # Extract address
-                address_match = re.search(r'Address:\s*([^.]+\.)', user_message, re.IGNORECASE)
-                company_address = address_match.group(1).strip() if address_match else ""
+                # Extract address - FIXED for "Address is" format
+                address_patterns = [
+                    r'Address is\s+([^\n]+?)(?:\s*industry|\s*company|\s*$)',  # "Address is XYZ" until next field
+                    r'Address:\s*([^.]+\.)',  # "Address: XYZ."
+                    r'Address:\s*([^,]+(?:,[^,]+)*)\s*(?:industry|company|deposit|field|$)',  # Until next field
+                ]
+                company_address = ""
+                for pattern in address_patterns:
+                    address_match = re.search(pattern, user_message, re.IGNORECASE)
+                    if address_match:
+                        company_address = address_match.group(1).strip()
+                        print(f"🔍 DEBUG: Mock client found address: '{company_address}'")
+                        break
                 
-                # Extract deposit
-                deposit_match = re.search(r'Deposit:\s*Rs\.?\s*([0-9,]+)', user_message, re.IGNORECASE)
-                deposit = deposit_match.group(1).replace(',', '') if deposit_match else ""
+                # Extract deposit - FIXED for "deposit 5000" format
+                deposit_patterns = [
+                    r'deposit\s+(\d+)',  # "deposit 5000"
+                    r'Deposit:\s*Rs\.?\s*([0-9,]+)',  # "Deposit: Rs 5000"
+                    r'Deposit\s+Rs\.?\s*([0-9,]+)',  # "Deposit Rs 5000"
+                ]
+                deposit = ""
+                for pattern in deposit_patterns:
+                    deposit_match = re.search(pattern, user_message, re.IGNORECASE)
+                    if deposit_match:
+                        deposit = deposit_match.group(1).replace(',', '')
+                        print(f"🔍 DEBUG: Mock client found deposit: '{deposit}'")
+                        break
                 
-                # Extract fee - handle multiple separators including semicolon
+                # Extract fee - FIXED for "flat fee 300" format
                 fee_patterns = [
-                    r'Flat\s+Fee[;\s:,]*Rs\.?\s*([0-9,]+)',  # Added comma separator
-                    r'(?:Flat\s+)?Fee[;\s:,]*Rs\.?\s*([0-9,]+)',  # Added comma separator
-                    r'Fee[;\s:,]*Rs\.?\s*([0-9,]+)',  # Added comma separator
-                    r'Rs\.?\s*([0-9,]+).*(?:fee|Fee)',
-                    r'Rs\.?\s*([0-9,]+)(?:\s*[,.]|\s*$)',  # More flexible end pattern
-                    r'(?:fee|Fee)[;\s:,]*Rs\.?\s*([0-9,]+)',  # Fee before Rs
-                    r'([0-9,]+)\s*(?:rs|Rs|RS)\.?\s*(?:fee|Fee)',  # Number before Rs fee
+                    r'flat fee\s+(\d+)',  # "flat fee 300"
+                    r'Flat\s+Fee[;\s:,]*Rs\.?\s*([0-9,]+)',  # "Flat Fee: Rs 320"
+                    r'(?:Flat\s+)?Fee[;\s:,]*Rs\.?\s*([0-9,]+)',  # "Fee: Rs 320"
+                    r'Commission[;\s:,]*Rs\.?\s*([0-9,]+)',  # "Commission: Rs 320"
+                    r'Rate[;\s:,]*Rs\.?\s*([0-9,]+)',  # "Rate: Rs 320"
                 ]
                 flat_fee = ""
                 for i, pattern in enumerate(fee_patterns):
                     fee_match = re.search(pattern, user_message, re.IGNORECASE)
                     if fee_match:
-                        flat_fee = fee_match.group(1).replace(',', '')
-                        print(f"🔍 DEBUG: Mock client found fee with pattern {i+1} '{pattern}': {flat_fee}")
+                        potential_fee = fee_match.group(1).replace(',', '')
+                        # Double-check this isn't the same as the deposit amount
+                        if potential_fee != deposit:
+                            flat_fee = potential_fee
+                            print(f"🔍 DEBUG: Mock client found fee with pattern {i+1}: {flat_fee}")
+                            break
+                        else:
+                            print(f"🔍 DEBUG: Mock client rejected fee candidate '{potential_fee}' - matches deposit amount")
+                
+                # Extract industry - FIXED for "industry clothing and fashion" format
+                industry_patterns = [
+                    r'industry\s+([^\n]+)',  # "industry clothing and fashion"
+                    r'Field:\s*([^,\n]+)',  # "Field: clothing"
+                    r'Industry:\s*([^,\n]+)',  # "Industry: clothing"
+                ]
+                industry = ""
+                for pattern in industry_patterns:
+                    field_match = re.search(pattern, user_message, re.IGNORECASE)
+                    if field_match:
+                        industry = field_match.group(1).strip()
+                        print(f"🔍 DEBUG: Mock client found industry: '{industry}'")
                         break
-                
-                if not flat_fee:
-                    print(f"🔍 DEBUG: Mock client could not find fee in message: {user_message}")
-                    # Try even more aggressive patterns as last resort
-                    aggressive_patterns = [
-                        r'(\d+)\s*(?:rs|Rs|RS)',  # Any number followed by rs
-                        r'Rs\.?\s*(\d+)',  # Rs followed by number
-                        r'(\d+).*(?:fee|Fee)',  # Any number with fee somewhere after
-                    ]
-                    for i, pattern in enumerate(aggressive_patterns):
-                        fee_match = re.search(pattern, user_message, re.IGNORECASE)
-                        if fee_match:
-                            potential_fee = fee_match.group(1)
-                            # Only accept if it's a reasonable fee amount (not deposit-like)
-                            if int(potential_fee) < 10000:  # Assume fees are less than 10k
-                                flat_fee = potential_fee
-                                print(f"🔍 DEBUG: Mock client found fee with aggressive pattern {i+1}: {flat_fee}")
-                                break
-                
-                # Extract industry/field
-                field_match = re.search(r'Field:\s*([^,\n]+)', user_message, re.IGNORECASE)
-                industry = field_match.group(1).strip() if field_match else ""
                 
                 # Convert deposit to words
                 deposit_in_words = ""
