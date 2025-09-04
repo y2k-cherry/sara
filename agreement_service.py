@@ -316,40 +316,75 @@ def extract_agreement_fields(message_text: str):
         # Manual extraction as fallback - this should always work
         data = {}
         
-        # Extract brand name
+        # Extract brand name - improved patterns for the exact format in the image
         brand_patterns = [
-            r'(?:for|with|brand)\s+([A-Za-z0-9\s&]+?)(?:,|$|\s+Legal)',
-            r'agreement for\s+([A-Za-z0-9\s&]+?)(?:,|$)',
-            r'generate.*?for\s+([A-Za-z0-9\s&]+?)(?:,|$)',
+            r'(?:for|with|brand)\s+([A-Za-z0-9\s&]+?)(?:\s*\n|\s*flat|\s*deposit|$)',  # Stop at newline or next field
+            r'agreement for\s+([A-Za-z0-9\s&]+?)(?:\s*\n|\s*flat|\s*deposit|$)',
+            r'generate.*?for\s+([A-Za-z0-9\s&]+?)(?:\s*\n|\s*flat|\s*deposit|$)',
         ]
+        data["brand_name"] = ""
         for pattern in brand_patterns:
             brand_match = re.search(pattern, message_text, re.IGNORECASE)
             if brand_match:
                 data["brand_name"] = brand_match.group(1).strip()
+                print(f"🔍 DEBUG: Manual extraction found brand: '{data['brand_name']}'")
                 break
         
-        # Extract legal name/company name
-        legal_match = re.search(r'Legal name:\s*([^,]+)', message_text, re.IGNORECASE)
-        data["company_name"] = legal_match.group(1).strip() if legal_match else ""
+        if not data["brand_name"]:
+            print("🔍 DEBUG: No brand found with standard patterns, trying fallback")
+            # Fallback: look for any word after "for" that's not a common word
+            fallback_match = re.search(r'for\s+([A-Za-z0-9]+)', message_text, re.IGNORECASE)
+            if fallback_match:
+                potential_brand = fallback_match.group(1).strip()
+                if potential_brand.lower() not in ['the', 'a', 'an', 'this', 'that']:
+                    data["brand_name"] = potential_brand
+                    print(f"🔍 DEBUG: Manual extraction found brand via fallback: '{data['brand_name']}'")
         
-        # Extract address - look for pattern after "Address:"
-        address_patterns = [
-            r'Address:\s*([^.]+\.)',  # Until period
-            r'Address:\s*([^,]+(?:,[^,]+)*)\s*(?:Deposit|Field|$)',  # Until next field
+        # Extract company name - handle both "Legal name:" and "company name is" formats
+        company_patterns = [
+            r'Legal name:\s*([^,\n]+)',  # "Legal name: XYZ"
+            r'company name is\s+([^\n]+)',  # "company name is XYZ"
+            r'company name:\s*([^\n]+)',  # "company name: XYZ"
         ]
+        data["company_name"] = ""
+        for pattern in company_patterns:
+            company_match = re.search(pattern, message_text, re.IGNORECASE)
+            if company_match:
+                data["company_name"] = company_match.group(1).strip()
+                print(f"🔍 DEBUG: Manual extraction found company: '{data['company_name']}'")
+                break
+        
+        # Extract address - handle both "Address:" and "Address is" formats
+        address_patterns = [
+            r'Address is\s+([^\n]+?)(?:\s*industry|\s*company|\s*$)',  # "Address is XYZ" until next field
+            r'Address:\s*([^.]+\.)',  # "Address: XYZ."
+            r'Address:\s*([^,]+(?:,[^,]+)*)\s*(?:industry|company|deposit|field|$)',  # Until next field
+        ]
+        data["company_address"] = ""
         for pattern in address_patterns:
             address_match = re.search(pattern, message_text, re.IGNORECASE)
             if address_match:
                 data["company_address"] = address_match.group(1).strip()
+                print(f"🔍 DEBUG: Manual extraction found address: '{data['company_address']}'")
                 break
         
-        # Extract deposit - ONLY from explicit "Deposit:" labels
-        deposit_match = re.search(r'Deposit:\s*Rs\.?\s*([0-9,]+)', message_text, re.IGNORECASE)
-        data["deposit"] = deposit_match.group(1).replace(',', '') if deposit_match else ""
-        print(f"🔍 DEBUG: Manual extraction deposit: '{data['deposit']}'")
+        # Extract deposit - handle both "deposit 5000" and "Deposit: Rs 5000" formats
+        deposit_patterns = [
+            r'deposit\s+(\d+)',  # "deposit 5000"
+            r'Deposit:\s*Rs\.?\s*([0-9,]+)',  # "Deposit: Rs 5000"
+            r'Deposit\s+Rs\.?\s*([0-9,]+)',  # "Deposit Rs 5000"
+        ]
+        data["deposit"] = ""
+        for pattern in deposit_patterns:
+            deposit_match = re.search(pattern, message_text, re.IGNORECASE)
+            if deposit_match:
+                data["deposit"] = deposit_match.group(1).replace(',', '')
+                print(f"🔍 DEBUG: Manual extraction found deposit: '{data['deposit']}'")
+                break
         
-        # Extract fee - ONLY from explicit fee-related labels, NEVER use deposit amount
+        # Extract fee - handle both "flat fee 300" and "Flat Fee: Rs 300" formats
         fee_patterns = [
+            r'flat fee\s+(\d+)',  # "flat fee 300"
             r'Flat\s+Fee[;\s:,]*Rs\.?\s*([0-9,]+)',  # "Flat Fee: Rs 320"
             r'(?:Flat\s+)?Fee[;\s:,]*Rs\.?\s*([0-9,]+)',  # "Fee: Rs 320"
             r'Commission[;\s:,]*Rs\.?\s*([0-9,]+)',  # "Commission: Rs 320"
@@ -368,13 +403,22 @@ def extract_agreement_fields(message_text: str):
                 else:
                     print(f"🔍 DEBUG: Rejected fee candidate '{potential_fee}' - matches deposit amount")
         
-        # NO aggressive fallback patterns that might confuse deposit with fee
         if not data["flat_fee"]:
             print("🔍 DEBUG: No explicit fee found in manual extraction - leaving empty")
         
-        # Extract industry/field
-        field_match = re.search(r'Field:\s*([^,\n]+)', message_text, re.IGNORECASE)
-        data["industry"] = field_match.group(1).strip() if field_match else ""
+        # Extract industry - handle both "Field:" and "industry" formats
+        industry_patterns = [
+            r'industry\s+([^\n]+)',  # "industry clothing and fashion"
+            r'Field:\s*([^,\n]+)',  # "Field: clothing"
+            r'Industry:\s*([^,\n]+)',  # "Industry: clothing"
+        ]
+        data["industry"] = ""
+        for pattern in industry_patterns:
+            industry_match = re.search(pattern, message_text, re.IGNORECASE)
+            if industry_match:
+                data["industry"] = industry_match.group(1).strip()
+                print(f"🔍 DEBUG: Manual extraction found industry: '{data['industry']}'")
+                break
         
         # Convert deposit to words
         data["deposit_in_words"] = ""
