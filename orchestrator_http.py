@@ -72,6 +72,12 @@ def route_mention(event, say):
 
     intent = get_intent_from_text(cleaned_text)
     print(f"🎯 Detected intent: {intent}")
+    
+    # Extra debug for agreement generation
+    if "agreement" in cleaned_text.lower():
+        print(f"🔍 AGREEMENT DEBUG: Message contains 'agreement'")
+        print(f"🔍 AGREEMENT DEBUG: Intent classification result: {intent}")
+        print(f"🔍 AGREEMENT DEBUG: Should route to agreement handler: {intent == 'generate_agreement'}")
 
     if intent == "generate_agreement":
         handle_agreement(event, say)
