@@ -316,18 +316,19 @@ def extract_agreement_fields(message_text: str):
         # Manual extraction as fallback - this should always work
         data = {}
         
-        # Extract brand name - improved patterns for the exact format in the image
+        # Extract brand name - BULLETPROOF patterns for the exact Bulbul message format
         brand_patterns = [
-            r'(?:for|with|brand)\s+([A-Za-z0-9\s&]+?)(?:\s*\n|\s*flat|\s*deposit|$)',  # Stop at newline or next field
-            r'agreement for\s+([A-Za-z0-9\s&]+?)(?:\s*\n|\s*flat|\s*deposit|$)',
-            r'generate.*?for\s+([A-Za-z0-9\s&]+?)(?:\s*\n|\s*flat|\s*deposit|$)',
+            r'generate an agreement for\s+([A-Za-z0-9\s&]+?)(?:\s*\n|$)',  # "generate an agreement for Bulbul"
+            r'agreement for\s+([A-Za-z0-9\s&]+?)(?:\s*\n|$)',  # "agreement for Bulbul"
+            r'generate.*?for\s+([A-Za-z0-9\s&]+?)(?:\s*\n|$)',  # "generate ... for Bulbul"
+            r'(?:for|with|brand)\s+([A-Za-z0-9\s&]+?)(?:\s*\n|\s*flat|\s*deposit|$)',  # Generic patterns
         ]
         data["brand_name"] = ""
-        for pattern in brand_patterns:
+        for i, pattern in enumerate(brand_patterns):
             brand_match = re.search(pattern, message_text, re.IGNORECASE)
             if brand_match:
                 data["brand_name"] = brand_match.group(1).strip()
-                print(f"🔍 DEBUG: Manual extraction found brand: '{data['brand_name']}'")
+                print(f"🔍 DEBUG: Manual extraction found brand with pattern {i+1}: '{data['brand_name']}'")
                 break
         
         if not data["brand_name"]:
