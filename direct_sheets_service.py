@@ -422,12 +422,22 @@ Provide a brief, direct answer. Do not suggest manual formulas or explain how th
             # Find brands with negative balances
             unpaid_brands = []
             
+            # Define rows to exclude (summary/total rows)
+            excluded_rows = {
+                'grand total', 'total', 'sum', 'subtotal', 'summary', 
+                'overall total', 'net total', 'final total'
+            }
+            
             for row in rows:
                 if len(row) >= 2:
                     brand_name = row[0].strip() if row[0] else ""
                     balance_str = row[1].strip() if row[1] else ""
                     
                     if brand_name and balance_str:
+                        # Skip summary/total rows
+                        if brand_name.lower() in excluded_rows:
+                            continue
+                            
                         try:
                             # Parse the balance (handle currency symbols, commas, etc.)
                             balance_clean = balance_str.replace('$', '').replace(',', '').replace('₹', '').strip()
