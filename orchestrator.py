@@ -11,6 +11,7 @@ from sheets_service import sheets_service
 from direct_sheets_service import DirectSheetsService
 from email_service import handle_email_request, handle_email_confirmation
 from brand_info_service import BrandInfoService
+from service_status_checker import ServiceStatusChecker
 
 
 # 1️⃣ Load environment variables early
@@ -94,6 +95,14 @@ def route_mention(event, say):
                 say("❌ Brand information service is not available.", thread_ts=event["ts"])
         except Exception as e:
             say(f"❌ Error looking up brand information: {str(e)}", thread_ts=event["ts"])
+    elif intent == "service_status":
+        say("🔍 Checking all service statuses...", thread_ts=event["ts"])
+        try:
+            status_checker = ServiceStatusChecker()
+            status_report = status_checker.format_status_report()
+            say(status_report, thread_ts=event["ts"])
+        except Exception as e:
+            say(f"❌ Error checking service status: {str(e)}", thread_ts=event["ts"])
     elif intent == "help":
         help_message = """👋 **Hi! I'm Sara, your AI assistant. Here's what I can help you with:**
 
@@ -120,6 +129,10 @@ def route_mention(event, say):
 📄 **Status Updates**
 • Check current project status and information
 • *Example: "What's the current status?"*
+
+🔧 **Service Status**
+• Check the health of all Sara services and diagnose issues
+• *Example: "service status" or "health check"*
 
 💡 **Tips:**
 • You can share Google Sheets URLs for specific analysis

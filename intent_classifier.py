@@ -13,19 +13,35 @@ def get_openai_client():
     global client
     if client is None:
         try:
-            # Try with just the API key first
-            client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+            # Try with minimal configuration to avoid version conflicts
+            api_key = os.getenv("OPENAI_API_KEY")
+            if not api_key:
+                raise ValueError("OPENAI_API_KEY not found")
+            
+            # Initialize with minimal parameters to avoid version issues
+            client = openai.OpenAI(
+                api_key=api_key,
+                timeout=30.0
+            )
+            
+            # Test the client with a simple call
+            test_response = client.chat.completions.create(
+                model="gpt-4",
+                messages=[{"role": "user", "content": "test"}],
+                max_tokens=1
+            )
+            print("✅ OpenAI client initialized and tested successfully")
+            
         except Exception as e:
             print(f"⚠️  OpenAI client initialization failed in intent_classifier: {e}")
-            # Skip the second attempt that also fails - go straight to mock client
-            print("⚠️  Using mock OpenAI client - defaulting to 'help' intent")
+            print("⚠️  Using mock OpenAI client - will rely on pattern matching only")
             client = type('MockClient', (), {
                 'chat': type('Chat', (), {
                     'completions': type('Completions', (), {
                         'create': lambda *args, **kwargs: type('Response', (), {
                             'choices': [type('Choice', (), {
                                 'message': type('Message', (), {
-                                    'content': 'help'  # Default to help intent
+                                    'content': 'unknown'  # Will trigger pattern matching fallback
                                 })()
                             })()]
                         })()
@@ -41,7 +57,12 @@ def get_intent_from_text(text: str) -> str:
     """
     text_lower = text.lower().strip()
     
-    # PRIORITY 1: Email sending (check first to handle mixed intents correctly)
+    # PRIORITY 1: Service status queries (most specific, check first)
+    service_status_patterns = ['service status', 'system status', 'health check', 'services status', 'check services']
+    if any(pattern in text_lower for pattern in service_status_patterns):
+        return 'service_status'
+    
+    # PRIORITY 2: Email sending (check early to handle mixed intents correctly)
     email_patterns = [
         'send email', 'email to', 'send an email', 'draft email', 'compose email', 
         'email about', 'email the', 'send the email', 'email them', 'email him', 
@@ -127,6 +148,11 @@ def get_intent_from_text(text: str) -> str:
     status_patterns = ['status', 'current status', 'what\'s the status', 'project status']
     if any(pattern in text_lower for pattern in status_patterns):
         return 'get_status'
+    
+    # Service status queries (new)
+    service_status_patterns = ['service status', 'system status', 'health check', 'services status', 'check services']
+    if any(pattern in text_lower for pattern in service_status_patterns):
+        return 'service_status'
     
     # Help requests
     help_patterns = [
