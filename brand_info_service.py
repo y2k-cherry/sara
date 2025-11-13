@@ -24,7 +24,7 @@ class BrandInfoService:
         
         # Brand Information Master sheet details
         self.brand_master_sheet_id = "1wkKXtgGLevFpbIaEWWrJ7Lw8iCUEjHT_Am-78PcJn80"
-        self.brand_master_sheet_name = "Brand Sheet Master"
+        self.brand_master_sheet_name = "Brand Information Master"
         # Use single quotes for sheet names with spaces
         self.brand_master_range = f"'{self.brand_master_sheet_name}'!A1:Z1000"
         
