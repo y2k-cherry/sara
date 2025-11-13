@@ -63,6 +63,9 @@ except Exception as e:
     print(f"⚠️  Brand Info Service failed to initialize: {e}")
     brand_info_service = None
 
+# State management for pending agreements (thread_ts -> original_message)
+pending_agreement_info = {}
+
 # ─── Function: route_mention ─────────────────────────────────────────────
 def route_mention(event, say):
     print(f"🎯 route_mention called with event: {event}")
@@ -210,6 +213,21 @@ def handle_all_messages(body, say, client, logger):
         if handle_email_confirmation(event, say):
             return  # Email confirmation handled, don't process further
         
+        # Check if there's a pending agreement that needs more info
+        if thread_ts in pending_agreement_info:
+            # User is providing missing info - combine with original message
+            original_message = pending_agreement_info[thread_ts]
+            combined_agreement_text = f"{original_message}\n{user_text}"
+            
+            # Create event with combined text
+            combined_event = {**event, "text": combined_agreement_text}
+            say("📝 Adding the details and generating agreement...", thread_ts=thread_ts)
+            handle_agreement(combined_event, say)
+            
+            # Clean up pending state
+            del pending_agreement_info[thread_ts]
+            return
+        
         # Check if user confirmed agreement generation after brand lookup
         if brand_info_service and thread_ts in brand_info_service.pending_agreement:
             confirmation_words = ['yes', 'yeah', 'yep', 'yup', 'sure', 'ok', 'okay', 'confirm', 'correct', 'right']
@@ -224,6 +242,9 @@ def handle_all_messages(body, say, client, logger):
                     agreement_message = f"Generate an agreement for {brand_data['company_name']}\n"
                     agreement_message += f"Legal name: {brand_data['registered_company_name']}\n"
                     agreement_message += f"Address: {brand_data['address']}"
+                    
+                    # Store the original agreement message for potential follow-up
+                    pending_agreement_info[thread_ts] = agreement_message
                     
                     # Create a modified event with the formatted message
                     agreement_event = {**event, "text": agreement_message}
