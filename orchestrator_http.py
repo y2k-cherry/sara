@@ -203,6 +203,21 @@ def handle_all_messages(body, say, client, logger):
         if handle_email_confirmation(event, say):
             return  # Email confirmation handled, don't process further
         
+        # Check if user wants to generate agreement after brand lookup
+        if brand_info_service and "generate agreement" in user_text.lower():
+            brand_data = brand_info_service.get_brand_data_for_agreement(thread_ts)
+            if brand_data:
+                # Format message with brand data for agreement service
+                agreement_message = f"Generate an agreement for {brand_data['company_name']}\n"
+                agreement_message += f"Legal name: {brand_data['registered_company_name']}\n"
+                agreement_message += f"Address: {brand_data['address']}"
+                
+                # Create a modified event with the formatted message
+                agreement_event = {**event, "text": agreement_message}
+                say("📝 Generating partnership agreement using brand information...", thread_ts=thread_ts)
+                handle_agreement(agreement_event, say)
+                return
+        
         if intent == "generate_agreement":
             handle_agreement({**event, "text": combined_text}, say)
         elif intent == "get_status":

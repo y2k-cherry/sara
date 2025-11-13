@@ -33,6 +33,9 @@ class BrandInfoService:
         
         # State management for pending confirmations
         self.pending_confirmations = {}  # thread_id -> brand_name
+        
+        # State management for brand data (used for post-lookup actions)
+        self.brand_data_cache = {}  # thread_id -> {brand_name, headers, row_data}
     
     def _get_openai_client(self):
         """Get OpenAI client with lazy initialization"""
@@ -237,6 +240,55 @@ If no clear brand name is found, return "UNCLEAR".
         text_lower = text.lower().strip()
         return text_lower in confirmation_words
     
+    def get_brand_data_for_agreement(self, thread_id: str) -> Optional[Dict[str, str]]:
+        """
+        Extract and format brand data for agreement generation
+        Returns dict with company_name, registered_company_name, and address
+        """
+        if thread_id not in self.brand_data_cache:
+            return None
+        
+        cached_data = self.brand_data_cache[thread_id]
+        headers = cached_data['headers']
+        row_data = cached_data['row_data']
+        
+        # Create a mapping of header names to values
+        data_map = {}
+        for i, (header, value) in enumerate(zip(headers, row_data)):
+            if header and len(row_data) > i:
+                data_map[header.strip().lower()] = value.strip() if value else ""
+        
+        # Extract required fields
+        company_name = data_map.get('company name', '')
+        registered_company_name = data_map.get('registered company name', '')
+        
+        # Combine address fields
+        address_parts = []
+        address_line1 = data_map.get('address line 1', '')
+        address_line2 = data_map.get('address line 2', '')
+        city = data_map.get('city', '')
+        state = data_map.get('state', '')
+        pin_code = data_map.get('pin code', '')
+        
+        if address_line1:
+            address_parts.append(address_line1)
+        if address_line2:
+            address_parts.append(address_line2)
+        if city:
+            address_parts.append(city)
+        if state:
+            address_parts.append(state)
+        if pin_code:
+            address_parts.append(pin_code)
+        
+        full_address = ", ".join(address_parts) if address_parts else ""
+        
+        return {
+            'company_name': company_name,
+            'registered_company_name': registered_company_name,
+            'address': full_address
+        }
+    
     def fetch_brand_info_by_name(self, brand_name: str) -> str:
         """Fetch brand information for a specific brand name without fuzzy matching"""
         try:
@@ -356,10 +408,24 @@ If no clear brand name is found, return "UNCLEAR".
             if not brand_row:
                 return f"Found the brand '{best_match}' but couldn't retrieve its information."
             
-            # Step 8: Format and return the brand information
+            # Step 8: Cache brand data for post-lookup actions
+            if thread_id:
+                self.brand_data_cache[thread_id] = {
+                    'brand_name': best_match,
+                    'headers': headers,
+                    'row_data': brand_row
+                }
+                print(f"💾 Cached brand data for thread {thread_id}: {best_match}")
+            
+            # Step 9: Format and return the brand information with post-lookup actions prompt
             formatted_info = self.format_brand_info(headers, brand_row)
             
-            return f"✅ Found information for **{best_match}**:\n\n{formatted_info}"
+            response = f"✅ Found information for **{best_match}**:\n\n{formatted_info}"
+            response += "\n\n📋 **What would you like to do next?**\n"
+            response += "• Type **'generate agreement'** to create a partnership agreement for this brand\n"
+            response += "• Or ask me anything else!"
+            
+            return response
             
         except Exception as e:
             return f"Sorry, I encountered an error processing your brand query: {e}"
