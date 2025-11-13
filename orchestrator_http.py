@@ -209,10 +209,9 @@ def handle_all_messages(body, say, client, logger):
     if f"<@{bot_user_id}>" in parent_text:
         combined_text = parent_text + "\n" + user_text
         cleaned_text = clean_slack_text(combined_text).lower()
-        intent = get_intent_from_text(cleaned_text)
 
-        # IMPORTANT: Check pending confirmations BEFORE any other processing
-        # This must happen before "Got it, one sec..." and before intent classification
+        # CRITICAL: Check ALL expected response contexts BEFORE intent classification
+        # This ensures context-aware responses don't get misrouted
         
         # Check if user confirmed agreement generation after brand lookup
         if brand_info_service and thread_ts in brand_info_service.pending_agreement:
@@ -286,6 +285,9 @@ def handle_all_messages(body, say, client, logger):
             # Clean up pending state
             del pending_agreement_info[thread_ts]
             return
+        
+        # NOW perform intent classification (only after all context checks passed)
+        intent = get_intent_from_text(cleaned_text)
         
         if intent == "generate_agreement":
             handle_agreement({**event, "text": combined_text}, say)
