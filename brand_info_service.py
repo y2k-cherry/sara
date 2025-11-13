@@ -28,8 +28,8 @@ class BrandInfoService:
         # Use single quotes for sheet names with spaces
         self.brand_master_range = f"'{self.brand_master_sheet_name}'!A1:Z1000"
         
-        # Column mapping (excluding column M as requested)
-        self.excluded_columns = ['M']  # Column M should be excluded
+        # Column mapping - no columns excluded (GST Number is in column M)
+        self.excluded_columns = []  # Include all columns including GST Number
     
     def _get_openai_client(self):
         """Get OpenAI client with lazy initialization"""
@@ -66,10 +66,15 @@ Query: "{query}"
 
 Examples:
 - "fetch Freakins info" → Freakins
+- "fetch Theater info" → Theater
 - "Show me info for Yama Yoga" → Yama Yoga
 - "What's FAE's GST number" → FAE
 - "Do we have inde wild's GST details" → inde wild
 - "What is Theater's brand ID" → Theater
+- "fetch Serenade info" → Serenade
+- "get info for BELLAVITA" → BELLAVITA
+
+Important: Extract single-word brand names correctly. The brand name can be a single word or multiple words.
 
 If no clear brand name is found, return "UNCLEAR".
 """
@@ -101,15 +106,16 @@ If no clear brand name is found, return "UNCLEAR".
     
     def _extract_brand_name_fallback(self, query: str) -> Optional[str]:
         """Fallback method to extract brand name using pattern matching"""
-        # Common patterns for brand queries
+        # Common patterns for brand queries - order matters, more specific first
         patterns = [
-            r"fetch\s+([^'\s]+(?:\s+[^'\s]+)*)\s+info",
-            r"show\s+me\s+info\s+for\s+([^'\s]+(?:\s+[^'\s]+)*)",
-            r"what'?s\s+([^'\s]+(?:\s+[^'\s]+)*)'?s?\s+gst",
-            r"do\s+we\s+have\s+([^'\s]+(?:\s+[^'\s]+)*)'?s?\s+gst",
-            r"what\s+is\s+([^'\s]+(?:\s+[^'\s]+)*)'?s?\s+brand\s+id",
-            r"([^'\s]+(?:\s+[^'\s]+)*)\s+info",
-            r"info\s+for\s+([^'\s]+(?:\s+[^'\s]+)*)",
+            r"fetch\s+([A-Za-z0-9][A-Za-z0-9\s&'-]*?)\s+info",
+            r"show\s+me\s+info\s+for\s+([A-Za-z0-9][A-Za-z0-9\s&'-]*?)(?:\s+|$)",
+            r"what'?s\s+([A-Za-z0-9][A-Za-z0-9\s&'-]*?)'?s?\s+gst",
+            r"what\s+is\s+([A-Za-z0-9][A-Za-z0-9\s&'-]*?)'?s?\s+(?:gst|brand\s+id|info)",
+            r"do\s+we\s+have\s+([A-Za-z0-9][A-Za-z0-9\s&'-]*?)'?s?\s+gst",
+            r"get\s+(?:me\s+)?(?:info(?:rmation)?\s+)?(?:about\s+|for\s+)?([A-Za-z0-9][A-Za-z0-9\s&'-]*?)(?:\s+info|\s+details|$)",
+            r"([A-Za-z0-9][A-Za-z0-9\s&'-]+?)\s+info(?:rmation)?",
+            r"info(?:rmation)?\s+for\s+([A-Za-z0-9][A-Za-z0-9\s&'-]*?)(?:\s+|$)",
         ]
         
         query_lower = query.lower().strip()
@@ -118,9 +124,11 @@ If no clear brand name is found, return "UNCLEAR".
             match = re.search(pattern, query_lower, re.IGNORECASE)
             if match:
                 brand_name = match.group(1).strip()
-                # Clean up common words
-                brand_name = re.sub(r'\b(the|a|an)\b', '', brand_name, flags=re.IGNORECASE).strip()
-                if brand_name:
+                # Clean up common words and trailing words
+                brand_name = re.sub(r'\b(the|a|an|info|information|details)\b', '', brand_name, flags=re.IGNORECASE).strip()
+                # Remove trailing apostrophes or 's
+                brand_name = re.sub(r"'s?$", '', brand_name).strip()
+                if brand_name and len(brand_name) > 1:  # At least 2 characters
                     return brand_name
         
         return None
