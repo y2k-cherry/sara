@@ -36,6 +36,9 @@ class BrandInfoService:
         
         # State management for brand data (used for post-lookup actions)
         self.brand_data_cache = {}  # thread_id -> {brand_name, headers, row_data}
+        
+        # State management for pending agreement generation
+        self.pending_agreement = {}  # thread_id -> True (waiting for confirmation)
     
     def _get_openai_client(self):
         """Get OpenAI client with lazy initialization"""
@@ -417,13 +420,10 @@ If no clear brand name is found, return "UNCLEAR".
                 }
                 print(f"💾 Cached brand data for thread {thread_id}: {best_match}")
             
-            # Step 9: Format and return the brand information with post-lookup actions prompt
+            # Step 9: Format and return the brand information (without post-lookup prompt)
             formatted_info = self.format_brand_info(headers, brand_row)
             
             response = f"✅ Found information for **{best_match}**:\n\n{formatted_info}"
-            response += "\n\n📋 **What would you like to do next?**\n"
-            response += "• Type **'generate agreement'** to create a partnership agreement for this brand\n"
-            response += "• Or ask me anything else!"
             
             return response
             

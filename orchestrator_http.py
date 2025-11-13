@@ -123,6 +123,13 @@ def route_mention(event, say):
                 # Pass thread_ts as thread_id for confirmation handling
                 response = brand_info_service.process_brand_query(cleaned_text, thread_id=event["ts"])
                 say(f"🏢 {response}", thread_ts=event["ts"])
+                
+                # Send follow-up action prompt in a separate message
+                if "✅ Found information for" in response:
+                    # Mark that we're waiting for agreement generation confirmation
+                    if brand_info_service:
+                        brand_info_service.pending_agreement[event["ts"]] = True
+                    say("📋 Would you like me to generate a partnership agreement for this brand?", thread_ts=event["ts"])
             else:
                 say("❌ Brand information service is not available.", thread_ts=event["ts"])
         except Exception as e:
@@ -203,19 +210,30 @@ def handle_all_messages(body, say, client, logger):
         if handle_email_confirmation(event, say):
             return  # Email confirmation handled, don't process further
         
-        # Check if user wants to generate agreement after brand lookup
-        if brand_info_service and "generate agreement" in user_text.lower():
-            brand_data = brand_info_service.get_brand_data_for_agreement(thread_ts)
-            if brand_data:
-                # Format message with brand data for agreement service
-                agreement_message = f"Generate an agreement for {brand_data['company_name']}\n"
-                agreement_message += f"Legal name: {brand_data['registered_company_name']}\n"
-                agreement_message += f"Address: {brand_data['address']}"
-                
-                # Create a modified event with the formatted message
-                agreement_event = {**event, "text": agreement_message}
-                say("📝 Generating partnership agreement using brand information...", thread_ts=thread_ts)
-                handle_agreement(agreement_event, say)
+        # Check if user confirmed agreement generation after brand lookup
+        if brand_info_service and thread_ts in brand_info_service.pending_agreement:
+            confirmation_words = ['yes', 'yeah', 'yep', 'yup', 'sure', 'ok', 'okay', 'confirm', 'correct', 'right']
+            if user_text.lower().strip() in confirmation_words:
+                # User confirmed - generate agreement
+                brand_data = brand_info_service.get_brand_data_for_agreement(thread_ts)
+                if brand_data:
+                    # Clear pending state
+                    del brand_info_service.pending_agreement[thread_ts]
+                    
+                    # Format message with brand data for agreement service
+                    agreement_message = f"Generate an agreement for {brand_data['company_name']}\n"
+                    agreement_message += f"Legal name: {brand_data['registered_company_name']}\n"
+                    agreement_message += f"Address: {brand_data['address']}"
+                    
+                    # Create a modified event with the formatted message
+                    agreement_event = {**event, "text": agreement_message}
+                    say("📝 Generating partnership agreement using brand information...", thread_ts=thread_ts)
+                    handle_agreement(agreement_event, say)
+                    return
+            else:
+                # User declined or said something else
+                del brand_info_service.pending_agreement[thread_ts]
+                say("👍 No problem! Let me know if you need anything else.", thread_ts=thread_ts)
                 return
         
         if intent == "generate_agreement":
