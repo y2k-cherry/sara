@@ -211,6 +211,42 @@ def handle_all_messages(body, say, client, logger):
         cleaned_text = clean_slack_text(combined_text).lower()
         intent = get_intent_from_text(cleaned_text)
 
+        # IMPORTANT: Check pending confirmations BEFORE any other processing
+        # This must happen before "Got it, one sec..." and before intent classification
+        
+        # Check if user confirmed agreement generation after brand lookup
+        if brand_info_service and thread_ts in brand_info_service.pending_agreement:
+            confirmation_words = ['yes', 'yeah', 'yep', 'yup', 'sure', 'ok', 'okay', 'confirm', 'correct', 'right']
+            if user_text.lower().strip() in confirmation_words:
+                say("🔄 Got it, one sec...", thread_ts=thread_ts)
+                # User confirmed - generate agreement
+                brand_data = brand_info_service.get_brand_data_for_agreement(thread_ts)
+                if brand_data:
+                    # Clear pending state
+                    del brand_info_service.pending_agreement[thread_ts]
+                    
+                    # Format message with brand data for agreement service
+                    agreement_message = f"Generate an agreement for {brand_data['company_name']}\n"
+                    agreement_message += f"Legal name: {brand_data['registered_company_name']}\n"
+                    agreement_message += f"Address: {brand_data['address']}"
+                    
+                    # Store the original agreement message for potential follow-up
+                    pending_agreement_info[thread_ts] = agreement_message
+                    
+                    # Mark that we're expecting agreement details as follow-up
+                    expected_response_context[thread_ts] = 'agreement_details'
+                    
+                    # Create a modified event with the formatted message
+                    agreement_event = {**event, "text": agreement_message}
+                    say("📝 Generating partnership agreement using brand information...", thread_ts=thread_ts)
+                    handle_agreement(agreement_event, say)
+                    return
+            else:
+                # User declined or said something else
+                del brand_info_service.pending_agreement[thread_ts]
+                say("👍 No problem! Let me know if you need anything else.", thread_ts=thread_ts)
+                return
+        
         say("🔄 Got it, one sec...", thread_ts=thread_ts)
 
         # First check if this is an email confirmation
@@ -250,38 +286,6 @@ def handle_all_messages(body, say, client, logger):
             # Clean up pending state
             del pending_agreement_info[thread_ts]
             return
-        
-        # Check if user confirmed agreement generation after brand lookup
-        if brand_info_service and thread_ts in brand_info_service.pending_agreement:
-            confirmation_words = ['yes', 'yeah', 'yep', 'yup', 'sure', 'ok', 'okay', 'confirm', 'correct', 'right']
-            if user_text.lower().strip() in confirmation_words:
-                # User confirmed - generate agreement
-                brand_data = brand_info_service.get_brand_data_for_agreement(thread_ts)
-                if brand_data:
-                    # Clear pending state
-                    del brand_info_service.pending_agreement[thread_ts]
-                    
-                    # Format message with brand data for agreement service
-                    agreement_message = f"Generate an agreement for {brand_data['company_name']}\n"
-                    agreement_message += f"Legal name: {brand_data['registered_company_name']}\n"
-                    agreement_message += f"Address: {brand_data['address']}"
-                    
-                    # Store the original agreement message for potential follow-up
-                    pending_agreement_info[thread_ts] = agreement_message
-                    
-                    # Mark that we're expecting agreement details as follow-up
-                    expected_response_context[thread_ts] = 'agreement_details'
-                    
-                    # Create a modified event with the formatted message
-                    agreement_event = {**event, "text": agreement_message}
-                    say("📝 Generating partnership agreement using brand information...", thread_ts=thread_ts)
-                    handle_agreement(agreement_event, say)
-                    return
-            else:
-                # User declined or said something else
-                del brand_info_service.pending_agreement[thread_ts]
-                say("👍 No problem! Let me know if you need anything else.", thread_ts=thread_ts)
-                return
         
         if intent == "generate_agreement":
             handle_agreement({**event, "text": combined_text}, say)
