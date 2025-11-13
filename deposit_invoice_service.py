@@ -26,8 +26,8 @@ slack_client = WebClient(token=SLACK_TOKEN)
 # Required fields for invoice generation
 REQUIRED_FIELDS = [
     "brand_name",
-    "address",  # Combined address
-    "deposit_amount"
+    "deposit_amount",
+    "invoice_number"
 ]
 
 
@@ -106,11 +106,12 @@ def extract_deposit_amount(message_text: str) -> str:
     Extract deposit amount from the message.
     Patterns: "5000", "Rs 5000", "₹5000", "deposit 5000", "amount 5000" etc.
     """
-    # Try various patterns
+    # Try various patterns - more specific patterns first
     patterns = [
-        r'(?:deposit|amount|invoice for|generate invoice for)\s+(?:rs\.?|₹)?\s*([0-9,]+)',
+        r'(?:amount|deposit)\s+(?:of\s+)?(?:rs\.?|₹)?\s*([0-9,]+)',
+        r'(?:for|invoice\s+for)\s+(?:rs\.?|₹)?\s*([0-9,]+)',
         r'(?:rs\.?|₹)\s*([0-9,]+)',
-        r'\b([0-9]{4,})\b',  # Any 4+ digit number
+        r'\b([0-9]{4,})\b',  # Any 4+ digit number as fallback
     ]
     
     for pattern in patterns:
@@ -124,13 +125,98 @@ def extract_deposit_amount(message_text: str) -> str:
     return ""
 
 
+def extract_invoice_number(message_text: str) -> str:
+    """
+    Extract invoice number from the message.
+    Patterns: "invoice #123", "invoice number 123", "#INV-001", etc.
+    """
+    patterns = [
+        r'#\s*([A-Z0-9-]+)',  # Match #INV-001, #123, etc.
+        r'invoice\s+#\s*([A-Z0-9-]+)',  # Match "invoice #123"
+        r'invoice\s+number\s*:?\s*([A-Z0-9-]+)',  # Match "invoice number 123"
+        r'\b(INV-[0-9]+)\b',  # Match standalone INV-001
+    ]
+    
+    for pattern in patterns:
+        match = re.search(pattern, message_text, re.IGNORECASE)
+        if match:
+            invoice_num = match.group(1).strip()
+            print(f"📋 Extracted invoice number: {invoice_num}")
+            return invoice_num
+    
+    print("⚠️ No invoice number found in message")
+    return ""
+
+
+def parse_address_components(address: str) -> dict:
+    """
+    Parse a combined address into separate components.
+    Returns dict with Brand_Address_Line_1, Brand_Address_Line_2, City, State, Pin_Code
+    """
+    if not address:
+        return {
+            "Brand_Address_Line_1": "",
+            "Brand_Address_Line_2": "",
+            "City": "",
+            "State": "",
+            "Pin_Code": ""
+        }
+    
+    # Split address by commas
+    parts = [p.strip() for p in address.split(',')]
+    
+    # Initialize components
+    components = {
+        "Brand_Address_Line_1": "",
+        "Brand_Address_Line_2": "",
+        "City": "",
+        "State": "",
+        "Pin_Code": ""
+    }
+    
+    # Try to extract pin code (6 digits)
+    pin_code_pattern = r'\b(\d{6})\b'
+    for i, part in enumerate(parts):
+        match = re.search(pin_code_pattern, part)
+        if match:
+            components["Pin_Code"] = match.group(1)
+            # Remove pin code from this part
+            parts[i] = re.sub(pin_code_pattern, '', part).strip()
+            break
+    
+    # Remove empty parts
+    parts = [p for p in parts if p]
+    
+    # Assign remaining parts
+    if len(parts) >= 1:
+        components["Brand_Address_Line_1"] = parts[0]
+    if len(parts) >= 2:
+        components["Brand_Address_Line_2"] = parts[1]
+    if len(parts) >= 3:
+        components["City"] = parts[2]
+    if len(parts) >= 4:
+        components["State"] = parts[3]
+    
+    # If we have fewer parts, try to be smart about city/state
+    if len(parts) == 3 and not components["State"]:
+        # Assume last part is state if no state found yet
+        components["State"] = parts[2]
+        components["City"] = parts[1] if len(parts) > 1 else ""
+    
+    return components
+
+
 def extract_invoice_fields(message_text: str, brand_data: dict = None):
     """
     Extract invoice fields from message and brand data.
     
     Args:
         message_text: The user's message
-        brand_data: Optional brand data from brand_info_service
+        brand_data: Optional brand data from brand_info_service with:
+            - company_name
+            - address (combined)
+            - phone (optional)
+            - email (optional)
     
     Returns:
         Tuple of (values dict, list of missing fields)
@@ -141,6 +227,10 @@ def extract_invoice_fields(message_text: str, brand_data: dict = None):
     
     values = {}
     
+    # Extract invoice number from message
+    invoice_number = extract_invoice_number(message_text)
+    values["invoice_number"] = invoice_number
+    
     # Extract deposit amount from message
     deposit_amount = extract_deposit_amount(message_text)
     values["deposit_amount"] = deposit_amount
@@ -148,8 +238,16 @@ def extract_invoice_fields(message_text: str, brand_data: dict = None):
     # If brand data is provided, use it
     if brand_data:
         print(f"🔍 Using brand data: {brand_data}")
-        values["brand_name"] = brand_data.get("company_name", "")
-        values["address"] = brand_data.get("address", "")
+        brand_name = brand_data.get("company_name", "")
+        values["brand_name"] = brand_name
+        
+        # Parse address into components
+        address = brand_data.get("address", "")
+        address_components = parse_address_components(address)
+        
+        # Add phone and email if available
+        phone = brand_data.get("phone", "Not Available")
+        email = brand_data.get("email", "Not Available")
     else:
         # Try to extract brand name from message
         brand_patterns = [
@@ -157,36 +255,49 @@ def extract_invoice_fields(message_text: str, brand_data: dict = None):
             r'generate invoice for\s+([A-Za-z0-9\s&]+?)(?:\s+\d|$)',
         ]
         
-        values["brand_name"] = ""
+        brand_name = ""
         for pattern in brand_patterns:
             match = re.search(pattern, message_text, re.IGNORECASE)
             if match:
-                values["brand_name"] = match.group(1).strip()
+                brand_name = match.group(1).strip()
                 break
         
-        values["address"] = ""
+        values["brand_name"] = brand_name
+        
+        # Empty address components
+        address_components = parse_address_components("")
+        phone = "Not Available"
+        email = "Not Available"
+    
+    # Map to template placeholders (with correct capitalization)
+    # NOTE: Invoice_Number in template has a # prefix
+    values["Invoice_Number"] = invoice_number
+    values["Brand_Name"] = brand_name
+    values["Brand_Address_Line_1"] = address_components["Brand_Address_Line_1"]
+    values["Brand_Address_Line_2"] = address_components["Brand_Address_Line_2"]
+    values["City"] = address_components["City"]
+    values["State"] = address_components["State"]
+    values["Pin_Code"] = address_components["Pin_Code"]
+    values["Phone"] = phone
+    values["Email"] = email
     
     # Calculate dates
     invoice_date = date.today()
     due_date = invoice_date + timedelta(days=15)
     
-    values["invoice_date"] = invoice_date.strftime("%d/%m/%Y")
-    values["due_date"] = due_date.strftime("%d/%m/%Y")
+    values["Invoice_Date"] = invoice_date.strftime("%d/%m/%Y")
+    values["Due_Date"] = due_date.strftime("%d/%m/%Y")
     
     # All three amounts are the same
     if deposit_amount:
         formatted_amount = format_currency(deposit_amount)
-        values["amount_due"] = formatted_amount
-        values["deposit_amount_formatted"] = formatted_amount
-        values["sub_total"] = formatted_amount
-        
-        # Convert to words
-        values["amount_in_words"] = convert_number_to_words(deposit_amount).title()
+        values["Amount_Due"] = formatted_amount
+        values["Deposit_Amount"] = formatted_amount
+        values["Sub_Total"] = formatted_amount
     else:
-        values["amount_due"] = ""
-        values["deposit_amount_formatted"] = ""
-        values["sub_total"] = ""
-        values["amount_in_words"] = ""
+        values["Amount_Due"] = ""
+        values["Deposit_Amount"] = ""
+        values["Sub_Total"] = ""
     
     # Check for missing required fields
     missing = []
@@ -200,9 +311,29 @@ def extract_invoice_fields(message_text: str, brand_data: dict = None):
     return values, missing
 
 
+def replace_text_in_paragraph(paragraph, search, replace):
+    """Helper function to replace text in a paragraph, handling runs correctly."""
+    if search not in paragraph.text:
+        return
+    
+    # Get the full text
+    full_text = paragraph.text
+    
+    # Replace the search text
+    new_text = full_text.replace(search, replace)
+    
+    # Clear all runs
+    for run in paragraph.runs:
+        run.text = ""
+    
+    # Add the new text as a single run
+    paragraph.runs[0].text = new_text
+
+
 def fill_invoice_template(values: dict, output_path: str):
     """
     Open the invoice template, replace placeholders, and save to output_path.
+    Uses proper Word document text replacement to handle runs correctly.
     """
     import html
     
@@ -210,24 +341,37 @@ def fill_invoice_template(values: dict, output_path: str):
     
     # Replace in paragraphs
     for p in doc.paragraphs:
+        # Check for invoice number with # prefix
+        if "#{{Invoice_Number}}" in p.text:
+            replace_text_in_paragraph(p, "#{{Invoice_Number}}", 
+                                    html.unescape(str(values.get("Invoice_Number", ""))))
+        
+        # Replace other placeholders
         for key, val in values.items():
             placeholder = f"{{{{{key}}}}}"
             if placeholder in p.text:
-                decoded_val = html.unescape(str(val))
-                p.text = p.text.replace(placeholder, decoded_val)
+                replace_text_in_paragraph(p, placeholder, html.unescape(str(val)))
     
     # Replace in tables
     for table in doc.tables:
         for row in table.rows:
             for cell in row.cells:
-                for key, val in values.items():
-                    placeholder = f"{{{{{key}}}}}"
-                    if placeholder in cell.text:
-                        decoded_val = html.unescape(str(val))
-                        cell.text = cell.text.replace(placeholder, decoded_val)
+                for paragraph in cell.paragraphs:
+                    # Check for invoice number with # prefix
+                    if "#{{Invoice_Number}}" in paragraph.text:
+                        replace_text_in_paragraph(paragraph, "#{{Invoice_Number}}", 
+                                                html.unescape(str(values.get("Invoice_Number", ""))))
+                    
+                    # Replace other placeholders
+                    for key, val in values.items():
+                        placeholder = f"{{{{{key}}}}}"
+                        if placeholder in paragraph.text:
+                            replace_text_in_paragraph(paragraph, placeholder, 
+                                                    html.unescape(str(val)))
     
     doc.save(output_path)
     print(f"✅ Invoice template filled and saved to: {output_path}")
+    print(f"✅ Replaced placeholders with actual values")
 
 
 def handle_deposit_invoice(event, say, brand_data: dict = None):
@@ -257,11 +401,11 @@ def handle_deposit_invoice(event, say, brand_data: dict = None):
     if missing:
         missing_display = {
             "brand_name": "brand name",
-            "address": "brand address",
-            "deposit_amount": "deposit amount"
+            "deposit_amount": "deposit amount (e.g., '5000' or 'Rs 5000')",
+            "invoice_number": "invoice number (e.g., 'INV-001' or '#123')"
         }
         missing_names = [missing_display.get(f, f) for f in missing]
-        say(f"🤖 I need a few more details: *{', '.join(missing_names)}*", thread_ts=thread_ts)
+        say(f"💰 Please provide the following:\n• " + "\n• ".join(missing_names), thread_ts=thread_ts)
         return False
     
     # Generate filename

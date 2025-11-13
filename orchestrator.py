@@ -4,6 +4,7 @@ from slack_bolt import App
 from slack_bolt.adapter.socket_mode import SocketModeHandler
 
 from agreement_service import handle_agreement
+from deposit_invoice_service import handle_deposit_invoice
 from utils import clean_slack_text
 from intent_classifier import get_intent_from_text
 from status_service import read_google_doc_text
@@ -96,6 +97,14 @@ def route_mention(event, say):
                 say("❌ Brand information service is not available.", thread_ts=event["ts"])
         except Exception as e:
             say(f"❌ Error looking up brand information: {str(e)}", thread_ts=event["ts"])
+    elif intent == "generate_deposit_invoice":
+        # Check if we have cached brand data for this thread
+        brand_data = None
+        if brand_info_service and event["ts"] in brand_info_service.brand_data_cache:
+            brand_data = brand_info_service.get_brand_data_for_invoice(event["ts"])
+        
+        # Handle deposit invoice generation
+        handle_deposit_invoice(event, say, brand_data=brand_data)
     elif intent == "service_status":
         say("🔍 Checking all service statuses...", thread_ts=event["ts"])
         try:
@@ -196,6 +205,14 @@ def handle_all_messages(body, say, client, logger):
                     say("❌ Brand information service is not available.", thread_ts=thread_ts)
             except Exception as e:
                 say(f"❌ Error looking up brand information: {str(e)}", thread_ts=thread_ts)
+        elif intent == "generate_deposit_invoice":
+            # Check if we have cached brand data for this thread
+            brand_data = None
+            if brand_info_service and thread_ts in brand_info_service.brand_data_cache:
+                brand_data = brand_info_service.get_brand_data_for_invoice(thread_ts)
+            
+            # Handle deposit invoice generation with combined text
+            handle_deposit_invoice({**event, "text": combined_text}, say, brand_data=brand_data)
         elif intent == "lookup_sheets":
             try:
                 if direct_sheets:
