@@ -84,23 +84,15 @@ def get_intent_from_text(text: str) -> str:
         if pattern in text_lower:
             return 'lookup_sheets'
     
-    # Additional sheets patterns
-    sheets_patterns = [
-        "sheet", "spreadsheet", "data", "how many", "count", "analyze", 
-        "lookup", "check", "brands", "metrics", "numbers", "balance"
-    ]
-    
-    # If contains sheets keywords, likely a sheets query
-    if any(pattern in text_lower for pattern in sheets_patterns):
-        return 'lookup_sheets'
-    
-    # PRIORITY 3: Brand information queries
+    # PRIORITY 3: Brand information queries (check BEFORE generic sheets patterns)
     import re
     
     # Specific brand patterns (regex for precise matching)
     brand_specific_patterns = [
         r'fetch\s+\w+.*info',
-        r'fetch\s+\w+.*details', 
+        r'fetch\s+\w+.*details',
+        r'lookup\s+\w+.*info',  # New: catch "lookup [brand] info"
+        r'lookup\s+\w+.*details',  # New: catch "lookup [brand] details"
         r'show\s+me\s+info\s+for\s+\w+',
         r'what\'?s\s+\w+.*gst',
         r'do\s+we\s+have\s+\w+.*gst',
