@@ -357,16 +357,22 @@ if slack_app:
     slack_app.event("message")(handle_all_messages)
     print("✅ Slack event handlers registered")
     
-    # Send startup notification to #sara-testing-channel
+    # Send startup notification to both channels
     try:
         startup_message = "👋 Hi! I have restarted and I'm ready to help!"
-        slack_app.client.chat_postMessage(
-            channel="#sara-testing-channel",
-            text=startup_message
-        )
-        print("✅ Startup notification sent to #sara-testing-channel")
+        channels = ["#sara-sales-agent", "#sara-testing"]
+        
+        for channel in channels:
+            try:
+                slack_app.client.chat_postMessage(
+                    channel=channel,
+                    text=startup_message
+                )
+                print(f"✅ Startup notification sent to {channel}")
+            except Exception as channel_error:
+                print(f"⚠️  Failed to send startup notification to {channel}: {channel_error}")
     except Exception as e:
-        print(f"⚠️  Failed to send startup notification: {e}")
+        print(f"⚠️  Failed to send startup notifications: {e}")
 
 
 # ─── Start the Flask App ─────────────────────────────────────────────────
