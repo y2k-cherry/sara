@@ -322,12 +322,15 @@ def replace_text_in_paragraph(paragraph, search, replace):
     # Replace the search text
     new_text = full_text.replace(search, replace)
     
-    # Clear all runs
-    for run in paragraph.runs:
-        run.text = ""
+    # Clear all existing runs except the first one
+    while len(paragraph.runs) > 1:
+        paragraph._element.remove(paragraph.runs[-1]._element)
     
-    # Add the new text as a single run
-    paragraph.runs[0].text = new_text
+    # Set the new text on the first run (or add a run if none exist)
+    if len(paragraph.runs) > 0:
+        paragraph.runs[0].text = new_text
+    else:
+        paragraph.add_run(new_text)
 
 
 def fill_invoice_template(values: dict, output_path: str):
