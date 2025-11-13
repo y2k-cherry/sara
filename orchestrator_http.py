@@ -5,6 +5,7 @@ from slack_bolt.adapter.flask import SlackRequestHandler
 from flask import Flask, request
 
 from agreement_service import handle_agreement
+from deposit_invoice_service import handle_deposit_invoice
 from utils import clean_slack_text
 from intent_classifier import get_intent_from_text
 from status_service import read_google_doc_text
@@ -89,6 +90,13 @@ def route_mention(event, say):
 
     if intent == "generate_agreement":
         handle_agreement(event, say)
+    elif intent == "generate_deposit_invoice":
+        # Check if we have brand data from recent lookup
+        if brand_info_service and event["ts"] in brand_info_service.brand_data_cache:
+            brand_data = brand_info_service.get_brand_data_for_agreement(event["ts"])
+            handle_deposit_invoice(event, say, brand_data)
+        else:
+            handle_deposit_invoice(event, say)
     elif intent == "get_status":
         status_text = read_google_doc_text()
         say(f"📄 Here's the status info from *Sara Test Doc*:\n\n{status_text}", thread_ts=event["ts"])
@@ -131,12 +139,13 @@ def route_mention(event, say):
                 response = brand_info_service.process_brand_query(cleaned_text, thread_id=event["ts"])
                 say(f"🏢 {response}", thread_ts=event["ts"])
                 
-                # Send follow-up action prompt in a separate message
+                # Send follow-up action prompt in a separate message with options
                 if "✅ Found information for" in response:
-                    # Mark that we're waiting for agreement generation confirmation
+                    # Mark that we're waiting for a choice
                     if brand_info_service:
                         brand_info_service.pending_agreement[event["ts"]] = True
-                    say("📋 Would you like me to generate a partnership agreement for this brand?", thread_ts=event["ts"])
+                        brand_info_service.pending_invoice[event["ts"]] = True
+                    say("📋 **What would you like to do next?**\n\n• Type 'agreement' to generate a partnership agreement\n• Type 'invoice' to generate a deposit invoice\n• Or just continue with another query", thread_ts=event["ts"])
             else:
                 say("❌ Brand information service is not available.", thread_ts=event["ts"])
         except Exception as e:
@@ -213,7 +222,60 @@ def handle_all_messages(body, say, client, logger):
         # CRITICAL: Check ALL expected response contexts BEFORE intent classification
         # This ensures context-aware responses don't get misrouted
         
-        # Check if user confirmed agreement generation after brand lookup
+        # Check if user is choosing between agreement or invoice after brand lookup
+        if brand_info_service and thread_ts in brand_info_service.pending_agreement and thread_ts in brand_info_service.pending_invoice:
+            user_choice = user_text.lower().strip()
+            
+            if 'agreement' in user_choice:
+                say("🔄 Got it, one sec...", thread_ts=thread_ts)
+                # User chose agreement - generate it
+                brand_data = brand_info_service.get_brand_data_for_agreement(thread_ts)
+                if brand_data:
+                    # Clear pending states
+                    del brand_info_service.pending_agreement[thread_ts]
+                    del brand_info_service.pending_invoice[thread_ts]
+                    
+                    # Format message with brand data for agreement service
+                    agreement_message = f"Generate an agreement for {brand_data['company_name']}\n"
+                    agreement_message += f"Legal name: {brand_data['registered_company_name']}\n"
+                    agreement_message += f"Address: {brand_data['address']}"
+                    
+                    # Store the original agreement message for potential follow-up
+                    pending_agreement_info[thread_ts] = agreement_message
+                    
+                    # Mark that we're expecting agreement details as follow-up
+                    expected_response_context[thread_ts] = 'agreement_details'
+                    
+                    # Create a modified event with the formatted message
+                    agreement_event = {**event, "text": agreement_message}
+                    say("📝 Generating partnership agreement using brand information...", thread_ts=thread_ts)
+                    handle_agreement(agreement_event, say)
+                    return
+                    
+            elif 'invoice' in user_choice:
+                say("🔄 Got it, one sec...", thread_ts=thread_ts)
+                # User chose invoice - ask for amount
+                brand_data = brand_info_service.get_brand_data_for_agreement(thread_ts)
+                if brand_data:
+                    # Clear pending states
+                    del brand_info_service.pending_agreement[thread_ts]
+                    del brand_info_service.pending_invoice[thread_ts]
+                    
+                    # Ask for deposit amount
+                    say("💰 Please provide the deposit amount (e.g., '5000' or 'Rs 5000')", thread_ts=thread_ts)
+                    
+                    # Store brand data for invoice generation
+                    # We'll use expected_response_context to catch the amount
+                    expected_response_context[thread_ts] = 'invoice_amount'
+                    return
+            else:
+                # User said something else - clear pending states
+                del brand_info_service.pending_agreement[thread_ts]
+                del brand_info_service.pending_invoice[thread_ts]
+                say("👍 No problem! Let me know if you need anything else.", thread_ts=thread_ts)
+                return
+        
+        # Legacy check for old yes/no confirmation (for backward compatibility)
         if brand_info_service and thread_ts in brand_info_service.pending_agreement:
             confirmation_words = ['yes', 'yeah', 'yep', 'yup', 'sure', 'ok', 'okay', 'confirm', 'correct', 'right']
             if user_text.lower().strip() in confirmation_words:
@@ -269,6 +331,26 @@ def handle_all_messages(body, say, client, logger):
                 # Clean up both pending states
                 del pending_agreement_info[thread_ts]
                 del expected_response_context[thread_ts]
+                return
+            
+            elif context_type == 'invoice_amount':
+                # User is providing deposit amount for invoice
+                brand_data = brand_info_service.get_brand_data_for_agreement(thread_ts) if brand_info_service else None
+                
+                if brand_data:
+                    # Create invoice message with brand data and amount
+                    invoice_message = f"generate invoice for {user_text}"
+                    
+                    # Create event with combined text
+                    invoice_event = {**event, "text": invoice_message}
+                    say("🧾 Generating deposit invoice...", thread_ts=thread_ts)
+                    handle_deposit_invoice(invoice_event, say, brand_data)
+                    
+                    # Clean up context state
+                    del expected_response_context[thread_ts]
+                else:
+                    say("❌ Sorry, I lost the brand data. Please start over by fetching the brand info first.", thread_ts=thread_ts)
+                    del expected_response_context[thread_ts]
                 return
         
         # Check if there's a pending agreement that needs more info (fallback)

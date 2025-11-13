@@ -131,6 +131,15 @@ def get_intent_from_text(text: str) -> str:
     
     # PRIORITY 4: Other specific intents
     
+    # Deposit invoice generation (check before agreements to avoid confusion)
+    invoice_patterns = [
+        'generate invoice', 'create invoice', 'deposit invoice', 'make invoice',
+        'invoice for', 'generate deposit invoice', 'create deposit invoice',
+        'advance deposit invoice', 'advance invoice'
+    ]
+    if any(pattern in text_lower for pattern in invoice_patterns):
+        return 'generate_deposit_invoice'
+    
     # Agreement generation
     agreement_patterns = ['generate agreement', 'create agreement', 'agreement for', 'partnership agreement']
     if any(pattern in text_lower for pattern in agreement_patterns):

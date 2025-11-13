@@ -39,6 +39,9 @@ class BrandInfoService:
         
         # State management for pending agreement generation
         self.pending_agreement = {}  # thread_id -> True (waiting for confirmation)
+        
+        # State management for pending invoice generation
+        self.pending_invoice = {}  # thread_id -> True (waiting for confirmation)
     
     def _get_openai_client(self):
         """Get OpenAI client with lazy initialization"""
