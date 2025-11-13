@@ -89,7 +89,8 @@ def route_mention(event, say):
         say("🔍 Looking up brand information...", thread_ts=event["ts"])
         try:
             if brand_info_service:
-                response = brand_info_service.process_brand_query(cleaned_text)
+                # Pass thread_ts as thread_id for confirmation handling
+                response = brand_info_service.process_brand_query(cleaned_text, thread_id=event["ts"])
                 say(f"🏢 {response}", thread_ts=event["ts"])
             else:
                 say("❌ Brand information service is not available.", thread_ts=event["ts"])
@@ -187,7 +188,9 @@ def handle_all_messages(body, say, client, logger):
         elif intent == "brand_info":
             try:
                 if brand_info_service:
-                    response = brand_info_service.process_brand_query(cleaned_text)
+                    # Pass thread_ts as thread_id for confirmation handling
+                    # Use user_text only (not combined_text) to detect confirmation
+                    response = brand_info_service.process_brand_query(user_text.lower().strip(), thread_id=thread_ts)
                     say(f"🏢 {response}", thread_ts=thread_ts)
                 else:
                     say("❌ Brand information service is not available.", thread_ts=thread_ts)

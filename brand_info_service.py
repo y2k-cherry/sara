@@ -30,6 +30,9 @@ class BrandInfoService:
         
         # Column mapping - no columns excluded (GST Number is in column M)
         self.excluded_columns = []  # Include all columns including GST Number
+        
+        # State management for pending confirmations
+        self.pending_confirmations = {}  # thread_id -> brand_name
     
     def _get_openai_client(self):
         """Get OpenAI client with lazy initialization"""
@@ -228,9 +231,70 @@ If no clear brand name is found, return "UNCLEAR".
         
         return response
     
-    def process_brand_query(self, query: str) -> str:
+    def is_confirmation(self, text: str) -> bool:
+        """Check if the text is a confirmation response"""
+        confirmation_words = ['yes', 'yeah', 'yep', 'yup', 'sure', 'ok', 'okay', 'confirm', 'correct', 'right']
+        text_lower = text.lower().strip()
+        return text_lower in confirmation_words
+    
+    def fetch_brand_info_by_name(self, brand_name: str) -> str:
+        """Fetch brand information for a specific brand name without fuzzy matching"""
+        try:
+            # Get sheet data
+            sheet_data = self.get_brand_sheet_data()
+            
+            if not sheet_data:
+                return "I couldn't access the Brand Information Master sheet."
+            
+            headers = sheet_data.get('headers', [])
+            rows = sheet_data.get('rows', [])
+            
+            if not headers or not rows:
+                return "The Brand Information Master sheet appears to be empty."
+            
+            # Find Company Name column (Column B)
+            company_name_col_index = None
+            for i, header in enumerate(headers):
+                if header.lower().strip() in ['company name', 'brand name', 'name'] or i == 1:
+                    company_name_col_index = i
+                    break
+            
+            if company_name_col_index is None:
+                return "I couldn't find the Company Name column in the Brand Master sheet."
+            
+            # Find the row with the matching brand (case-insensitive)
+            brand_row = None
+            for row in rows:
+                if (len(row) > company_name_col_index and 
+                    row[company_name_col_index].strip().lower() == brand_name.lower()):
+                    brand_row = row
+                    break
+            
+            if not brand_row:
+                return f"I couldn't find information for '{brand_name}' in the Brand Master sheet."
+            
+            # Format and return the brand information
+            formatted_info = self.format_brand_info(headers, brand_row)
+            
+            return f"✅ Found information for **{brand_name}**:\n\n{formatted_info}"
+            
+        except Exception as e:
+            return f"Sorry, I encountered an error: {e}"
+    
+    def process_brand_query(self, query: str, thread_id: str = None) -> str:
         """Main method to process brand information queries"""
         try:
+            # Check if this is a confirmation response
+            if thread_id and thread_id in self.pending_confirmations:
+                if self.is_confirmation(query):
+                    brand_name = self.pending_confirmations[thread_id]
+                    del self.pending_confirmations[thread_id]  # Clear the pending confirmation
+                    print(f"✅ Confirmation received for: {brand_name}")
+                    return self.fetch_brand_info_by_name(brand_name)
+                else:
+                    # Not a confirmation, clear pending and continue with normal processing
+                    del self.pending_confirmations[thread_id]
+            
             # Step 1: Extract brand name from query
             brand_name = self.extract_brand_name(query)
             
@@ -275,6 +339,10 @@ If no clear brand name is found, return "UNCLEAR".
             
             # Step 6: If similarity is not perfect, ask for confirmation
             if similarity_ratio < 0.9:
+                # Store pending confirmation
+                if thread_id:
+                    self.pending_confirmations[thread_id] = best_match
+                    print(f"💾 Stored pending confirmation for thread {thread_id}: {best_match}")
                 return f"I found a similar brand: **{best_match}** (similarity: {similarity_ratio:.0%})\n\nDid you mean '{best_match}'? Please confirm and I'll fetch the information."
             
             # Step 7: Find the row with the matching brand
