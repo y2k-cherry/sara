@@ -4,7 +4,7 @@ from slack_bolt import App
 from slack_bolt.adapter.socket_mode import SocketModeHandler
 
 from agreement_service import handle_agreement
-from deposit_invoice_service import handle_deposit_invoice
+from deposit_invoice_service_v2 import handle_deposit_invoice
 from utils import clean_slack_text
 from intent_classifier import get_intent_from_text
 from status_service import read_google_doc_text
@@ -159,89 +159,121 @@ Just mention me with `@Sara` and ask away! 🚀"""
 # ─── Function: handle_all_messages (thread replies) ──────────────────────
 @app.event("message")
 def handle_all_messages(body, say, client, logger):
+    """
+    Handle messages in threads where Sara was mentioned in the parent message.
+    Maintains context from parent message for intent detection.
+    """
     event = body.get("event", {})
+    
+    # Ignore bot messages
     if event.get("bot_id"):
         return
 
     thread_ts = event.get("thread_ts")
+    
+    # Only process if it's a thread reply (not a top-level message)
     if not thread_ts:
         return
 
     channel = event["channel"]
     user_text = event.get("text", "")
+    
+    print(f"📨 [THREAD] Received message in thread {thread_ts}")
+    print(f"📨 [THREAD] User text: {user_text[:100]}...")
 
+    # Fetch parent message to check context
     try:
         resp = client.conversations_replies(channel=channel, ts=thread_ts, limit=1)
         parent_text = resp["messages"][0].get("text", "")
+        print(f"📨 [THREAD] Parent message: {parent_text[:100]}...")
     except Exception as e:
         logger.error("Failed to fetch thread replies: %s", e)
         return
 
-    if f"<@{bot_user_id}>" in parent_text:
-        combined_text = parent_text + "\n" + user_text
-        cleaned_text = clean_slack_text(combined_text).lower()
-        intent = get_intent_from_text(cleaned_text)
+    # Only process if Sara was mentioned in the parent message
+    if f"<@{bot_user_id}>" not in parent_text:
+        print(f"📨 [THREAD] Sara not mentioned in parent, ignoring")
+        return
+    
+    print(f"📨 [THREAD] Sara was mentioned in parent, processing thread reply")
 
-        say("🔄 Got it, one sec...", thread_ts=thread_ts)
+    # Combine parent and user text for context
+    combined_text = parent_text + "\n" + user_text
+    cleaned_text = clean_slack_text(combined_text).lower()
+    
+    # Get intent from combined text
+    intent = get_intent_from_text(cleaned_text)
+    print(f"📨 [THREAD] Detected intent: {intent}")
 
-        # First check if this is an email confirmation
-        if handle_email_confirmation(event, say):
-            return  # Email confirmation handled, don't process further
+    say("🔄 Got it, one sec...", thread_ts=thread_ts)
+
+    # First check if this is an email confirmation
+    if handle_email_confirmation(event, say):
+        print(f"📨 [THREAD] Email confirmation handled")
+        return  # Email confirmation handled, don't process further
+    
+    # Process based on intent
+    if intent == "generate_agreement":
+        handle_agreement({**event, "text": combined_text}, say)
+    elif intent == "get_status":
+        say("📊 Status checks coming soon!", thread_ts=thread_ts)
+    elif intent == "send_email":
+        handle_email_request({**event, "text": combined_text}, say)
+    elif intent == "brand_info":
+        try:
+            if brand_info_service:
+                # Pass thread_ts as thread_id for confirmation handling
+                # Use user_text only (not combined_text) to detect confirmation
+                response = brand_info_service.process_brand_query(user_text.lower().strip(), thread_id=thread_ts)
+                say(f"🏢 {response}", thread_ts=thread_ts)
+            else:
+                say("❌ Brand information service is not available.", thread_ts=thread_ts)
+        except Exception as e:
+            say(f"❌ Error looking up brand information: {str(e)}", thread_ts=thread_ts)
+    elif intent == "generate_deposit_invoice":
+        print(f"📨 [THREAD] Processing deposit invoice request")
         
-        if intent == "generate_agreement":
-            handle_agreement({**event, "text": combined_text}, say)
-        elif intent == "get_status":
-            say("📊 Status checks coming soon!", thread_ts=thread_ts)
-        elif intent == "send_email":
-            handle_email_request({**event, "text": combined_text}, say)
-        elif intent == "brand_info":
-            try:
-                if brand_info_service:
-                    # Pass thread_ts as thread_id for confirmation handling
-                    # Use user_text only (not combined_text) to detect confirmation
-                    response = brand_info_service.process_brand_query(user_text.lower().strip(), thread_id=thread_ts)
-                    say(f"🏢 {response}", thread_ts=thread_ts)
-                else:
-                    say("❌ Brand information service is not available.", thread_ts=thread_ts)
-            except Exception as e:
-                say(f"❌ Error looking up brand information: {str(e)}", thread_ts=thread_ts)
-        elif intent == "generate_deposit_invoice":
-            # Check if we have cached brand data for this thread
-            brand_data = None
-            if brand_info_service and thread_ts in brand_info_service.brand_data_cache:
-                brand_data = brand_info_service.get_brand_data_for_invoice(thread_ts)
-            
-            # Handle deposit invoice generation with combined text
-            handle_deposit_invoice({**event, "text": combined_text}, say, brand_data=brand_data)
-        elif intent == "lookup_sheets":
-            try:
-                if direct_sheets:
-                    # Check if there's a Google Sheets URL in the combined text
-                    if 'docs.google.com/spreadsheets' in combined_text:
-                        # Extract the URL and use direct sheets service
-                        import re
-                        url_match = re.search(r'https://docs\.google\.com/spreadsheets/d/([a-zA-Z0-9-_]+)', combined_text)
-                        if url_match:
-                            sheet_url = url_match.group(0)
-                            response = direct_sheets.process_sheets_query(sheet_url, cleaned_text)
-                            say(f"📊 {response}", thread_ts=thread_ts)
-                        else:
-                            # Fallback to original service
-                            response = sheets_service.lookup_data_in_sheets(cleaned_text)
-                            say(f"📊 {response}", thread_ts=thread_ts)
+        # Check if we have cached brand data for this thread
+        brand_data = None
+        if brand_info_service and thread_ts in brand_info_service.brand_data_cache:
+            brand_data = brand_info_service.get_brand_data_for_invoice(thread_ts)
+            print(f"📨 [THREAD] Found cached brand data: {bool(brand_data)}")
+        else:
+            print(f"📨 [THREAD] No cached brand data found")
+        
+        # Handle deposit invoice generation with combined text
+        # IMPORTANT: Use combined_text which includes parent context
+        print(f"📨 [THREAD] Calling handle_deposit_invoice with combined text")
+        handle_deposit_invoice({**event, "text": combined_text}, say, brand_data=brand_data)
+    elif intent == "lookup_sheets":
+        try:
+            if direct_sheets:
+                # Check if there's a Google Sheets URL in the combined text
+                if 'docs.google.com/spreadsheets' in combined_text:
+                    # Extract the URL and use direct sheets service
+                    import re
+                    url_match = re.search(r'https://docs\.google\.com/spreadsheets/d/([a-zA-Z0-9-_]+)', combined_text)
+                    if url_match:
+                        sheet_url = url_match.group(0)
+                        response = direct_sheets.process_sheets_query(sheet_url, cleaned_text)
+                        say(f"📊 {response}", thread_ts=thread_ts)
                     else:
-                        # Use direct sheets service for all queries (including payment queries)
-                        # This will automatically detect payment queries and route to Brand Balances sheet
-                        response = direct_sheets.process_sheets_query("", cleaned_text)
+                        # Fallback to original service
+                        response = sheets_service.lookup_data_in_sheets(cleaned_text)
                         say(f"📊 {response}", thread_ts=thread_ts)
                 else:
-                    # Fallback to original MCP-based service if direct sheets not available
-                    response = sheets_service.lookup_data_in_sheets(cleaned_text)
+                    # Use direct sheets service for all queries (including payment queries)
+                    # This will automatically detect payment queries and route to Brand Balances sheet
+                    response = direct_sheets.process_sheets_query("", cleaned_text)
                     say(f"📊 {response}", thread_ts=thread_ts)
-            except Exception as e:
-                say(f"❌ Error looking up data: {str(e)}", thread_ts=thread_ts)
-        elif intent == "help":
-            help_message = """👋 **Hi! I'm Sara, your AI assistant. Here's what I can help you with:**
+            else:
+                # Fallback to original MCP-based service if direct sheets not available
+                response = sheets_service.lookup_data_in_sheets(cleaned_text)
+                say(f"📊 {response}", thread_ts=thread_ts)
+        except Exception as e:
+            say(f"❌ Error looking up data: {str(e)}", thread_ts=thread_ts)
+    elif intent == "help":
+        help_message = """👋 **Hi! I'm Sara, your AI assistant. Here's what I can help you with:**
 
 🤝 **Partnership Agreements**
 • Generate custom partnership agreements
@@ -268,9 +300,9 @@ def handle_all_messages(body, say, client, logger):
 • Payment queries automatically check the Brand Balances sheet
 
 Just mention me with `@Sara` and ask away! 🚀"""
-            say(help_message, thread_ts=thread_ts)
-        else:
-            say("🤔 I couldn't understand what you meant. Can you rephrase?", thread_ts=thread_ts)
+        say(help_message, thread_ts=thread_ts)
+    else:
+        say("🤔 I couldn't understand what you meant. Can you rephrase?", thread_ts=thread_ts)
 
 
 # ─── Start the Socket Mode App ───────────────────────────────────────────
