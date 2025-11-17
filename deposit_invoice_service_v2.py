@@ -32,6 +32,37 @@ REQUIRED_FIELDS = [
     "invoice_number"
 ]
 
+# State management for deposit invoice generation flow
+# Tracks threads that are in the middle of invoice generation
+deposit_invoice_threads = {}  # thread_id -> {"stage": "awaiting_amount|awaiting_invoice_number", "brand_data": {...}, "amount": "..."}
+
+
+def is_in_deposit_invoice_flow(thread_id: str) -> bool:
+    """Check if a thread is currently in a deposit invoice generation flow"""
+    return thread_id in deposit_invoice_threads
+
+
+def get_deposit_invoice_state(thread_id: str) -> Optional[dict]:
+    """Get the current state of a deposit invoice flow"""
+    return deposit_invoice_threads.get(thread_id)
+
+
+def set_deposit_invoice_state(thread_id: str, stage: str, brand_data: Optional[dict] = None, amount: str = ""):
+    """Set the state for a deposit invoice flow"""
+    deposit_invoice_threads[thread_id] = {
+        "stage": stage,
+        "brand_data": brand_data,
+        "amount": amount
+    }
+    print(f"📝 [INVOICE STATE] Thread {thread_id}: stage={stage}, has_brand_data={bool(brand_data)}, amount={amount}")
+
+
+def clear_deposit_invoice_state(thread_id: str):
+    """Clear the state for a deposit invoice flow"""
+    if thread_id in deposit_invoice_threads:
+        print(f"🧹 [INVOICE STATE] Clearing state for thread {thread_id}")
+        del deposit_invoice_threads[thread_id]
+
 
 class InvoiceLogger:
     """Enhanced logging for invoice generation with stage tracking"""
@@ -546,6 +577,7 @@ def fill_invoice_template(values: dict, output_path: str, logger: InvoiceLogger)
 def handle_deposit_invoice(event, say, brand_data: Optional[dict] = None):
     """
     Generate deposit invoice with brand data and user-provided amount.
+    Multi-step flow with state management.
     
     Args:
         event: Slack event
@@ -564,17 +596,86 @@ def handle_deposit_invoice(event, say, brand_data: Optional[dict] = None):
     logger.log(f"Channel: {channel}", "DEBUG")
     logger.log(f"Brand data provided: {bool(brand_data)}", "INFO")
     
-    # Send acknowledgement
-    say("🧾 Got it - working on your deposit invoice! ⚡", thread_ts=thread_ts)
+    # Check if we're in an existing flow
+    existing_state = get_deposit_invoice_state(thread_ts)
+    logger.log(f"Existing state: {existing_state}", "DEBUG")
     
-    # Clean and extract fields
+    # Clean text
     logger.set_stage("TEXT_CLEANING")
     cleaned = clean_text(raw)
     logger.log(f"Cleaned text: '{cleaned[:200]}...'", "DEBUG")
     
-    values, missing = extract_invoice_fields(cleaned, brand_data, logger)
+    # Handle multi-step flow based on state
+    if existing_state:
+        stage = existing_state.get("stage")
+        logger.log(f"Continuing flow at stage: {stage}", "INFO")
+        
+        if stage == "awaiting_amount":
+            # Extract amount from current message
+            amount = extract_deposit_amount(cleaned, logger)
+            if amount:
+                # Store amount and move to next stage
+                stored_brand_data = existing_state.get("brand_data")
+                set_deposit_invoice_state(thread_ts, "awaiting_invoice_number", stored_brand_data, amount)
+                say("💰 Great! Now please provide the invoice number (e.g., 'INV-001' or 'SB/DP/001')", thread_ts=thread_ts)
+                return True
+            else:
+                say("❌ I couldn't find an amount in your message. Please provide it as a number (e.g., '50000' or 'Rs 50000')", thread_ts=thread_ts)
+                return False
+        
+        elif stage == "awaiting_invoice_number":
+            # Extract invoice number from current message
+            invoice_number = extract_invoice_number(cleaned, logger)
+            if invoice_number:
+                # We have everything - generate the invoice
+                stored_brand_data = existing_state.get("brand_data")
+                stored_amount = existing_state.get("amount")
+                
+                # Create a combined message with all info for extraction
+                combined_message = f"invoice {invoice_number} for {stored_amount}"
+                logger.log(f"Combined message for extraction: {combined_message}", "DEBUG")
+                
+                values, missing = extract_invoice_fields(combined_message, stored_brand_data, logger)
+                
+                if not missing:
+                    # Clear state before generating
+                    clear_deposit_invoice_state(thread_ts)
+                    # Continue with invoice generation below
+                else:
+                    logger.log(f"Still missing fields after combining: {missing}", "ERROR")
+                    clear_deposit_invoice_state(thread_ts)
+                    say(f"❌ Error: Missing required fields: {', '.join(missing)}", thread_ts=thread_ts)
+                    return False
+            else:
+                say("❌ I couldn't find an invoice number in your message. Please provide it (e.g., 'INV-001', '#123', or 'SB/DP/001')", thread_ts=thread_ts)
+                return False
+    else:
+        # First time - check what we have
+        logger.log("Starting new deposit invoice flow", "INFO")
+        values, missing = extract_invoice_fields(cleaned, brand_data, logger)
+        
+        # If we have brand data but missing amount/invoice, start interactive flow
+        if brand_data and missing:
+            logger.log("Brand data present but missing other fields, starting interactive flow", "INFO")
+            
+            if "deposit_amount" in missing and "invoice_number" in missing:
+                # Ask for amount first
+                set_deposit_invoice_state(thread_ts, "awaiting_amount", brand_data)
+                say(f"💰 Great! I have the brand details for **{brand_data.get('company_name', 'the brand')}**.\n\nNow, please provide the deposit amount (e.g., '50000' or 'Rs 50000')", thread_ts=thread_ts)
+                return True
+            elif "deposit_amount" in missing:
+                # Have invoice but need amount
+                set_deposit_invoice_state(thread_ts, "awaiting_amount", brand_data)
+                say("💰 Please provide the deposit amount (e.g., '50000' or 'Rs 50000')", thread_ts=thread_ts)
+                return True
+            elif "invoice_number" in missing:
+                # Have amount but need invoice
+                amount = extract_deposit_amount(cleaned, logger)
+                set_deposit_invoice_state(thread_ts, "awaiting_invoice_number", brand_data, amount)
+                say("💰 Please provide the invoice number (e.g., 'INV-001' or 'SB/DP/001')", thread_ts=thread_ts)
+                return True
     
-    # Check for missing fields
+    # Check for missing fields (after state checks)
     if missing:
         logger.log(f"Missing required fields: {missing}", "ERROR")
         missing_display = {
