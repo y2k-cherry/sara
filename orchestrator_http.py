@@ -5,7 +5,7 @@ from slack_bolt.adapter.flask import SlackRequestHandler
 from flask import Flask, request
 
 from agreement_service import handle_agreement
-from deposit_invoice_service import handle_deposit_invoice
+from deposit_invoice_service_v2 import handle_deposit_invoice, is_in_deposit_invoice_flow
 from utils import clean_slack_text
 from intent_classifier import get_intent_from_text
 from status_service import read_google_doc_text
@@ -218,6 +218,21 @@ def handle_all_messages(body, say, client, logger):
     if f"<@{bot_user_id}>" in parent_text:
         combined_text = parent_text + "\n" + user_text
         cleaned_text = clean_slack_text(combined_text).lower()
+
+        # CRITICAL: Check if we're in an active deposit invoice flow BEFORE intent classification
+        # If the user is expected to provide amount/invoice number, route directly to handler
+        if is_in_deposit_invoice_flow(thread_ts):
+            print(f"📨 [THREAD] Thread is in active deposit invoice flow - bypassing intent classification")
+            say("🔄 Got it, one sec...", thread_ts=thread_ts)
+            
+            # Get cached brand data if available
+            brand_data = None
+            if brand_info_service and thread_ts in brand_info_service.brand_data_cache:
+                brand_data = brand_info_service.get_brand_data_for_invoice(thread_ts)
+            
+            # Route directly to deposit invoice handler with user text only
+            handle_deposit_invoice({**event, "text": user_text}, say, brand_data=brand_data)
+            return
 
         # CRITICAL: Check ALL expected response contexts BEFORE intent classification
         # This ensures context-aware responses don't get misrouted
