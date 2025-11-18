@@ -337,9 +337,19 @@ def extract_invoice_fields(message_text: str, brand_data: Optional[dict], logger
         values["brand_name"] = brand_name
         logger.log(f"Brand name from data: {brand_name}", "DEBUG")
         
-        # Parse address into components
-        address = brand_data.get("address", "")
-        address_components = parse_address_components(address, logger)
+        # Use separate address components directly from brand_data (NEW APPROACH)
+        # No parsing needed - the brand_info_service now provides them separately
+        address_line1 = brand_data.get("address_line1", "")
+        address_line2 = brand_data.get("address_line2", "")
+        city = brand_data.get("city", "")
+        state = brand_data.get("state", "")
+        pin_code = brand_data.get("pin_code", "")
+        
+        logger.log(f"Address Line 1: {address_line1}", "DEBUG")
+        logger.log(f"Address Line 2: {address_line2}", "DEBUG")
+        logger.log(f"City: {city}", "DEBUG")
+        logger.log(f"State: {state}", "DEBUG")
+        logger.log(f"Pin Code: {pin_code}", "DEBUG")
         
         # Add phone and email if available
         phone = brand_data.get("phone", "Not Available")
@@ -363,19 +373,23 @@ def extract_invoice_fields(message_text: str, brand_data: Optional[dict], logger
         
         values["brand_name"] = brand_name
         
-        # Empty address components
-        address_components = parse_address_components("", logger)
+        # Empty address components when no brand data
+        address_line1 = ""
+        address_line2 = ""
+        city = ""
+        state = ""
+        pin_code = ""
         phone = "Not Available"
         email = "Not Available"
     
     # Map to template placeholders (with correct capitalization)
     values["Invoice_Number"] = invoice_number
     values["Brand_Name"] = brand_name
-    values["Brand_Address_Line_1"] = address_components["Brand_Address_Line_1"]
-    values["Brand_Address_Line_2"] = address_components["Brand_Address_Line_2"]
-    values["City"] = address_components["City"]
-    values["State"] = address_components["State"]
-    values["Pin_Code"] = address_components["Pin_Code"]
+    values["Brand_Address_Line_1"] = address_line1
+    values["Brand_Address_Line_2"] = address_line2
+    values["City"] = city
+    values["State"] = state
+    values["Pin_Code"] = pin_code
     values["Phone"] = phone
     values["Email"] = email
     

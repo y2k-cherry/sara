@@ -298,7 +298,7 @@ If no clear brand name is found, return "UNCLEAR".
     def get_brand_data_for_invoice(self, thread_id: str) -> Optional[Dict[str, str]]:
         """
         Extract and format brand data for invoice generation
-        Returns dict with company_name, address, phone, and email
+        Returns dict with company_name, separate address components, phone, and email
         """
         if thread_id not in self.brand_data_cache:
             return None
@@ -313,37 +313,25 @@ If no clear brand name is found, return "UNCLEAR".
             if header and len(row_data) > i:
                 data_map[header.strip().lower()] = value.strip() if value else ""
         
-        # Extract required fields
+        # Extract required fields - keep address components separate
         company_name = data_map.get('company name', '')
-        
-        # Combine address fields
-        address_parts = []
         address_line1 = data_map.get('address line 1', '')
         address_line2 = data_map.get('address line 2', '')
         city = data_map.get('city', '')
         state = data_map.get('state', '')
         pin_code = data_map.get('pin code', '')
         
-        if address_line1:
-            address_parts.append(address_line1)
-        if address_line2:
-            address_parts.append(address_line2)
-        if city:
-            address_parts.append(city)
-        if state:
-            address_parts.append(state)
-        if pin_code:
-            address_parts.append(pin_code)
-        
-        full_address = ", ".join(address_parts) if address_parts else ""
-        
-        # Extract phone and email
+        # Extract phone and email - try multiple possible column names
         phone = data_map.get('phone', data_map.get('phone number', data_map.get('contact number', '')))
-        email = data_map.get('email', data_map.get('email address', ''))
+        email = data_map.get('email', data_map.get('emailid', data_map.get('email id', data_map.get('email address', ''))))
         
         return {
             'company_name': company_name,
-            'address': full_address,
+            'address_line1': address_line1,
+            'address_line2': address_line2,
+            'city': city,
+            'state': state,
+            'pin_code': pin_code,
             'phone': phone,
             'email': email
         }
