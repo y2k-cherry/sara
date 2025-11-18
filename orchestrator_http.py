@@ -93,7 +93,7 @@ def route_mention(event, say):
     elif intent == "generate_deposit_invoice":
         # Check if we have brand data from recent lookup
         if brand_info_service and event["ts"] in brand_info_service.brand_data_cache:
-            brand_data = brand_info_service.get_brand_data_for_agreement(event["ts"])
+            brand_data = brand_info_service.get_brand_data_for_invoice(event["ts"])
             handle_deposit_invoice(event, say, brand_data)
         else:
             handle_deposit_invoice(event, say)
@@ -350,7 +350,7 @@ def handle_all_messages(body, say, client, logger):
             
             elif context_type == 'invoice_amount':
                 # User is providing deposit amount for invoice
-                brand_data = brand_info_service.get_brand_data_for_agreement(thread_ts) if brand_info_service else None
+                brand_data = brand_info_service.get_brand_data_for_invoice(thread_ts) if brand_info_service else None
                 
                 if brand_data:
                     # Create invoice message with brand data and amount
